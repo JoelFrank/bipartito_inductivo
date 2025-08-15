@@ -82,7 +82,7 @@ def main(_):
     
     data = torch.load(dataset_path)
     dataset = [data]
-    log.info(f'Graph loaded: {data} in {time.time() - st_time:.2f}s')
+    log.info(f'Graph loaded: {data.num_nodes} nodes, {data.edge_index.shape[1]} edges in {time.time() - st_time:.2f}s')
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

@@ -21,12 +21,13 @@ flags.DEFINE_string('config_file', None, 'Path to configuration file')
 
 def process_config_file():
     """Process config file before main execution"""
+    config_processed = False
     if len(sys.argv) > 1:
         # Look for --config_file in command line args
         for i, arg in enumerate(sys.argv):
             if arg == '--config_file' and i + 1 < len(sys.argv):
                 config_path = sys.argv[i + 1]
-                if os.path.exists(config_path):
+                if os.path.exists(config_path) and not config_processed:
                     # Read config file and insert flags into sys.argv
                     with open(config_path, 'r') as f:
                         config_flags = []
@@ -45,8 +46,9 @@ def process_config_file():
                                     else:
                                         config_flags.append(line)
                     
-                    # Insert config flags before the config_file argument
-                    sys.argv[i:i] = config_flags
+                    # Insert config flags before the config_file argument, remove duplicates
+                    sys.argv = [sys.argv[0]] + config_flags + sys.argv[i+2:]  # Skip config_file args
+                    config_processed = True
                 break
 
 # Process config file before flag parsing
@@ -98,7 +100,7 @@ def main(_):
     
     data = torch.load(dataset_path)
     dataset = [data]
-    log.info(f'Graph loaded: {data} in {time.time() - st_time:.2f}s')
+    log.info(f'Graph loaded: {data.num_nodes} nodes, {data.edge_index.shape[1]} edges in {time.time() - st_time:.2f}s')
 
     # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -140,9 +142,9 @@ def main(_):
         else:
             log.warning(f"Archivo de metadatos no encontrado: {metadata_path}")
         
-        log.info(f"Train data: {train_data}")
-        log.info(f"Val data: {val_data}")
-        log.info(f"Test data: {test_data}")
+        log.info(f"Train data: {train_data.num_nodes} nodes, {train_data.edge_index.shape[1]} edges")
+        log.info(f"Val data: {val_data.num_nodes} nodes, {val_data.edge_index.shape[1]} edges")
+        log.info(f"Test data: {test_data.num_nodes} nodes, {test_data.edge_index.shape[1]} edges")
         
         # For inductive learning, we use the train_data for training
         training_data = train_data.to(device)
@@ -213,8 +215,23 @@ def main(_):
 
         log.info("Encoder training finished. Evaluating decoder...")
         
-        # Create embedding layer from representations
-        embeddings = torch.nn.Embedding.from_pretrained(representations, freeze=True)
+        if FLAGS.split_method == 'inductive':
+            # For inductive evaluation, generate fresh embeddings using the trained encoder
+            # All data splits already contain all nodes (2798), so we can use any of them
+            # We use train_data structure but the encoder was trained on its edge pattern
+            log.info("Generando embeddings para evaluación inductiva...")
+            
+            encoder.eval()
+            with torch.no_grad():
+                # Generate embeddings for all nodes using train_data structure
+                # (all splits have the same nodes, only edges differ)
+                all_representations = encoder(training_data)
+            
+            embeddings = torch.nn.Embedding.from_pretrained(all_representations, freeze=True)
+            log.info(f"✓ Embeddings generados para {all_representations.size(0)} nodos")
+        else:
+            # Transductive case: use the representations from training
+            embeddings = torch.nn.Embedding.from_pretrained(representations, freeze=True)
         
         # Evaluate decoder
         if FLAGS.split_method == 'inductive':
@@ -256,4 +273,5 @@ def main(_):
     log.info(f'--- TRAINING FINISHED ---\nResults: {agg_results}\nLogs in: {OUTPUT_DIR}')
 
 if __name__ == "__main__":
+    process_config_file()
     app.run(main)
