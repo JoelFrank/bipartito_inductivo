@@ -1,0 +1,12 @@
+{"timestamp": 1.4169397354125977, "datetime": "2025-08-15T18:07:55.514223", "tbgrl_train_loss": -0.02198423258960247, "epoch": 1}
+{"timestamp": 1.7260513305664062, "datetime": "2025-08-15T18:07:55.823334", "prod_mlp_val_auc": 0.5897814530419374}
+{"timestamp": 1.7260513305664062, "datetime": "2025-08-15T18:07:55.823334", "prod_mlp_val_ap": 0.999607555862204}
+{"timestamp": 1.7301075458526611, "datetime": "2025-08-15T18:07:55.827391", "prod_mlp_val_hits@10": 0.8812758417011223}
+{"timestamp": 1.7301075458526611, "datetime": "2025-08-15T18:07:55.827391", "prod_mlp_val_hits@50": 0.8812758417011223}
+{"timestamp": 1.7301075458526611, "datetime": "2025-08-15T18:07:55.827391", "prod_mlp_val_hits@100": 0.8812758417011223}
+{"timestamp": 1.7301075458526611, "datetime": "2025-08-15T18:07:55.827391", "prod_mlp_test_auc": 0.504134672179563}
+{"timestamp": 1.7351577281951904, "datetime": "2025-08-15T18:07:55.832441", "prod_mlp_test_ap": 0.9995944293975992}
+{"timestamp": 1.7351577281951904, "datetime": "2025-08-15T18:07:55.832441", "prod_mlp_test_hits@10": 0.5623154164205553}
+{"timestamp": 1.7351577281951904, "datetime": "2025-08-15T18:07:55.832441", "prod_mlp_test_hits@50": 0.5623154164205553}
+{"timestamp": 1.7351577281951904, "datetime": "2025-08-15T18:07:55.832441", "prod_mlp_test_hits@100": 0.5623154164205553}
+{"timestamp": 1.7351577281951904, "datetime": "2025-08-15T18:07:55.832441", "final_val_auc_mean": 0.5897814530419374, "final_val_auc_std": 0.0, "final_val_ap_mean": 0.999607555862204, "final_val_ap_std": 0.0, "final_val_hits@10_mean": 0.8812758417011223, "final_val_hits@10_std": 0.0, "final_val_hits@50_mean": 0.8812758417011223, "final_val_hits@50_std": 0.0, "final_val_hits@100_mean": 0.8812758417011223, "final_val_hits@100_std": 0.0, "final_test_auc_mean": 0.504134672179563, "final_test_auc_std": 0.0, "final_test_ap_mean": 0.9995944293975992, "final_test_ap_std": 0.0, "final_test_hits@10_mean": 0.5623154164205553, "final_test_hits@10_std": 0.0, "final_test_hits@50_mean": 0.5623154164205553, "final_test_hits@50_std": 0.0, "final_test_hits@100_mean": 0.5623154164205553, "final_test_hits@100_std": 0.0}

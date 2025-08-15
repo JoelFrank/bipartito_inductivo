@@ -128,7 +128,7 @@ def main(_):
         test_data = torch.load(test_path)
         
         # Cargar metadatos para obtener el grafo completo (muestreo negativo inductivo)
-        metadata_path = os.path.join(FLAGS.dataset_dir, 'processed', f'{FLAGS.dataset}_inductive_metadata.pt')
+        metadata_path = os.path.join(FLAGS.dataset_dir, 'processed', f'{FLAGS.dataset}_metadata.pt')
         if os.path.exists(metadata_path):
             metadata = torch.load(metadata_path)
             if 'full_edge_index' in metadata:
