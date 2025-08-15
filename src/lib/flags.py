@@ -23,6 +23,7 @@ def define_flags(model_group: ModelGroup):
     flags.DEFINE_float('lr', 0.008, 'Learning rate')
     flags.DEFINE_integer('epochs', 5000, 'Number of epochs')
     flags.DEFINE_integer('lr_warmup_epochs', 500, 'Learning rate warmup epochs')
+    flags.DEFINE_integer('decoder_epochs', 100, 'Number of epochs for decoder training')
     flags.DEFINE_float('weight_decay', 1e-5, 'Weight decay')
     flags.DEFINE_integer('num_runs', 1, 'Number of runs')
     

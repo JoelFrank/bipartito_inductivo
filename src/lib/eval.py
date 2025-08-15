@@ -3,11 +3,13 @@ import numpy as np
 from sklearn.metrics import roc_auc_score, average_precision_score
 from torch_geometric.utils import negative_sampling
 import logging
+from absl import flags
 
 # Import bipartite-aware negative sampling
-from .split import bipartite_negative_sampling
+from .split import bipartite_negative_sampling, bipartite_negative_sampling_inductive
 
 log = logging.getLogger(__name__)
+FLAGS = flags.FLAGS
 
 def eval_all(y_pred_pos, y_pred_neg):
     """Evaluate link prediction performance"""
@@ -75,7 +77,7 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
         optimizer = torch.optim.Adam(decoder.parameters(), lr=0.01)
         criterion = torch.nn.BCEWithLogitsLoss()
         
-        for epoch in range(100):  # Train decoder for 100 epochs
+        for epoch in range(FLAGS.decoder_epochs):  # Use configurable decoder epochs
             decoder.train()
             optimizer.zero_grad()
             
@@ -88,8 +90,15 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             
             # Negative edges (sample random) - CORRECCIÓN: usar muestreo bipartito-consciente
             if is_bipartite:
-                neg_edges = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
-                neg_edges = neg_edges.t()  # Convert back to expected format
+                # Verificar si hay grafo completo para muestreo inductivo correcto
+                if hasattr(data, 'full_edge_index'):
+                    log.info("Usando muestreo negativo inductivo correcto durante entrenamiento del decoder")
+                    neg_edges = bipartite_negative_sampling_inductive(data.full_edge_index, data, train_edge.size(0))
+                    neg_edges = neg_edges.t()  # Convert back to expected format
+                else:
+                    log.warning("Grafo completo no disponible. Usando muestreo bipartito estándar en decoder.")
+                    neg_edges = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
+                    neg_edges = neg_edges.t()  # Convert back to expected format
             else:
                 # Handle both dataset[0] and single dataset structures
                 if hasattr(dataset, 'num_nodes'):

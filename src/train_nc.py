@@ -125,6 +125,21 @@ def main(_):
         val_data = torch.load(val_path)
         test_data = torch.load(test_path)
         
+        # Cargar metadatos para obtener el grafo completo (muestreo negativo inductivo)
+        metadata_path = os.path.join(FLAGS.dataset_dir, 'processed', f'{FLAGS.dataset}_inductive_metadata.pt')
+        if os.path.exists(metadata_path):
+            metadata = torch.load(metadata_path)
+            if 'full_edge_index' in metadata:
+                # Agregar el grafo completo a cada split para muestreo negativo correcto
+                train_data.full_edge_index = metadata['full_edge_index']
+                val_data.full_edge_index = metadata['full_edge_index']
+                test_data.full_edge_index = metadata['full_edge_index']
+                log.info(f"✓ Grafo completo cargado desde metadatos: {metadata['full_edge_index'].size(1)} aristas")
+            else:
+                log.warning("Grafo completo no encontrado en metadatos. Usando muestreo estándar.")
+        else:
+            log.warning(f"Archivo de metadatos no encontrado: {metadata_path}")
+        
         log.info(f"Train data: {train_data}")
         log.info(f"Val data: {val_data}")
         log.info(f"Test data: {test_data}")

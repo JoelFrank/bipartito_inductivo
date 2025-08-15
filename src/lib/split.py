@@ -23,6 +23,34 @@ def bipartite_negative_sampling(edge_index, data, num_neg_samples):
     neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
     return neg_edge_index
 
+def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples):
+    """
+    Muestreo negativo inductivo correcto: usa el grafo COMPLETO como referencia.
+    Garantiza que los enlaces negativos NO existan en ningún momento temporal.
+    
+    Args:
+        full_edge_index: El grafo completo (todas las aristas temporales)
+        data: Objeto con metadatos bipartitos
+        num_neg_samples: Número de muestras negativas deseadas
+    
+    Returns:
+        neg_edge_index: Enlaces negativos que NO existen en el grafo completo
+    """
+    num_nodes_type_1 = data.num_nodes_type_1
+    num_nodes_total = data.num_nodes
+    
+    log.info(f"Muestreo negativo inductivo: usando grafo completo con {full_edge_index.size(1)} aristas")
+    
+    neg_edge_index = negative_sampling(
+        edge_index=full_edge_index,  # ✓ CLAVE: usar grafo completo, no subset
+        num_nodes=(num_nodes_type_1, num_nodes_total - num_nodes_type_1),
+        num_neg_samples=num_neg_samples,
+        method='sparse'
+    )
+    # Ajustar índices de destino al rango global
+    neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
+    return neg_edge_index
+
 def generate_neg_edges(pos_edges, num_nodes, num_neg=None):
     """
     Generate negative edges for evaluation.
@@ -88,8 +116,15 @@ def do_transductive_edge_split(dataset, split_seed=42):
     # Generate negative edges - use bipartite-aware sampling if applicable
     if is_bipartite:
         log.info("Grafo bipartito detectado. Usando muestreo negativo bipartito.")
-        val_neg_edges = bipartite_negative_sampling(val_edges, data, val_edges.size(1))
-        test_neg_edges = bipartite_negative_sampling(test_edges, data, test_edges.size(1))
+        # Verificar si hay grafo completo disponible para muestreo inductivo
+        if hasattr(data, 'full_edge_index'):
+            log.info("Grafo completo disponible. Usando muestreo negativo inductivo correcto.")
+            val_neg_edges = bipartite_negative_sampling_inductive(data.full_edge_index, data, val_edges.size(1))
+            test_neg_edges = bipartite_negative_sampling_inductive(data.full_edge_index, data, test_edges.size(1))
+        else:
+            log.warning("Grafo completo no disponible. Usando muestreo bipartito estándar.")
+            val_neg_edges = bipartite_negative_sampling(val_edges, data, val_edges.size(1))
+            test_neg_edges = bipartite_negative_sampling(test_edges, data, test_edges.size(1))
     else:
         log.info("Grafo estándar detectado. Usando muestreo negativo estándar.")
         val_neg_edges = generate_neg_edges(val_edges, data.num_nodes)

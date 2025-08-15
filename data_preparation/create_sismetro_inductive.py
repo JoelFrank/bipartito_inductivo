@@ -13,8 +13,8 @@ def create_sismetro_inductive_split():
     print(f"--- Creando grafo bipartito Sismetro con split inductivo temporal ---")
     
     # Rutas
-    excel_path = r"../data/raw/sismetro/SISMETRO-Exportacao-SS-2021-2024_P1(OK PATRIMONIO).xlsx"
-    save_dir = r"../data/processed"
+    excel_path = r"data/raw/sismetro/SISMETRO-Exportacao-SS-2021-2024_P1(OK PATRIMONIO).xlsx"
+    save_dir = r"data/processed"
     
     # Leer el archivo Excel
     print(f"Cargando datos desde: {excel_path}")
@@ -86,6 +86,18 @@ def create_sismetro_inductive_split():
     print(f"Total tipos de equipamento: {len(all_tipos)}")
     print(f"Total nodos: {total_nodes}")
     
+    # Crear GRAFO COMPLETO para referencia en muestreo negativo inductivo
+    print(f"\n--- CREANDO GRAFO COMPLETO PARA REFERENCIA ---")
+    all_src_nodes = [patrimonio_to_idx[p] for p in df_sorted[patrimonio_col]]
+    all_dst_nodes = [localizacao_to_idx[l] + num_patrimonios for l in df_sorted[localizacao_col]]
+    
+    # Edge index bidireccional del grafo completo
+    full_edge_index_forward = torch.tensor([all_src_nodes, all_dst_nodes], dtype=torch.long)
+    full_edge_index_backward = torch.tensor([all_dst_nodes, all_src_nodes], dtype=torch.long)
+    full_edge_index = torch.cat([full_edge_index_forward, full_edge_index_backward], dim=1)
+    
+    print(f"✓ Grafo completo: {full_edge_index.size(1)} aristas (bidireccionales)")
+    
     def create_graph_from_split(split_data, split_name):
         """Crear grafo para un split específico"""
         print(f"\n--- CREANDO GRAFO PARA {split_name.upper()} ---")
@@ -131,7 +143,8 @@ def create_sismetro_inductive_split():
             edge_index=edge_index,
             num_nodes=total_nodes,
             num_nodes_type_1=num_patrimonios,
-            num_nodes_type_2=num_localizacoes
+            num_nodes_type_2=num_localizacoes,
+            full_edge_index=full_edge_index  # ✓ NUEVO: Grafo completo para muestreo negativo
         )
         
         # Calcular estadísticas de nodos presentes en este split
@@ -180,6 +193,7 @@ def create_sismetro_inductive_split():
         'all_patrimonios': all_patrimonios,
         'all_localizacoes': all_localizacoes,
         'all_tipos': all_tipos,
+        'full_edge_index': full_edge_index,  # ✓ NUEVO: Grafo completo para referencia
         'split_info': {
             'train_period': (train_data[date_col].min(), train_data[date_col].max()),
             'val_period': (val_data[date_col].min(), val_data[date_col].max()),
