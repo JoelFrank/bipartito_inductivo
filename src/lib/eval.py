@@ -1,6 +1,13 @@
 import torch
 import numpy as np
 from sklearn.metrics import roc_auc_score, average_precision_score
+from torch_geometric.utils import negative_sampling
+import logging
+
+# Import bipartite-aware negative sampling
+from .split import bipartite_negative_sampling
+
+log = logging.getLogger(__name__)
 
 def eval_all(y_pred_pos, y_pred_neg):
     """Evaluate link prediction performance"""
@@ -51,6 +58,16 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
     valid_edge_neg = edge_split['valid']['edge_neg'].to(device)
     test_edge_neg = edge_split['test']['edge_neg'].to(device)
     
+    # Get the original data object for bipartite information
+    if hasattr(dataset, 'num_nodes'):
+        data = dataset
+    else:
+        data = dataset[0]
+    
+    is_bipartite = hasattr(data, 'num_nodes_type_1')
+    if is_bipartite:
+        log.info("Evaluación bipartita detectada. Usando muestreo negativo bipartito.")
+    
     for model_type in valid_models:
         decoder = decoder_zoo.get_model(model_type, embeddings.embedding_dim).to(device)
         
@@ -69,13 +86,17 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             ], dim=1)
             pos_pred = decoder(pos_embeddings)
             
-            # Negative edges (sample random)
-            # Handle both dataset[0] and single dataset structures
-            if hasattr(dataset, 'num_nodes'):
-                num_nodes = dataset.num_nodes
+            # Negative edges (sample random) - CORRECCIÓN: usar muestreo bipartito-consciente
+            if is_bipartite:
+                neg_edges = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
+                neg_edges = neg_edges.t()  # Convert back to expected format
             else:
-                num_nodes = dataset[0].num_nodes
-            neg_edges = torch.randint(0, num_nodes, (train_edge.size(0), 2), device=device)
+                # Handle both dataset[0] and single dataset structures
+                if hasattr(dataset, 'num_nodes'):
+                    num_nodes = dataset.num_nodes
+                else:
+                    num_nodes = dataset[0].num_nodes
+                neg_edges = torch.randint(0, num_nodes, (train_edge.size(0), 2), device=device)
             neg_embeddings = torch.cat([
                 embeddings(neg_edges[:, 0]),
                 embeddings(neg_edges[:, 1])
