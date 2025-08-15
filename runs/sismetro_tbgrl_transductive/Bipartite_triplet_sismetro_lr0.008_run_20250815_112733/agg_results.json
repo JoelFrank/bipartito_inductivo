@@ -1,0 +1,22 @@
+{
+    "val_auc_mean": 0.9602815282964665,
+    "val_auc_std": 0.0,
+    "val_ap_mean": 0.9698390954629803,
+    "val_ap_std": 0.0,
+    "val_hits@10_mean": 0.8779661016949153,
+    "val_hits@10_std": 0.0,
+    "val_hits@50_mean": 0.9423728813559322,
+    "val_hits@50_std": 0.0,
+    "val_hits@100_mean": 0.9525423728813559,
+    "val_hits@100_std": 0.0,
+    "test_auc_mean": 0.9648675305240961,
+    "test_auc_std": 0.0,
+    "test_ap_mean": 0.9715905906026302,
+    "test_ap_std": 0.0,
+    "test_hits@10_mean": 0.9090909090909091,
+    "test_hits@10_std": 0.0,
+    "test_hits@50_mean": 0.9528619528619529,
+    "test_hits@50_std": 0.0,
+    "test_hits@100_mean": 0.9696969696969697,
+    "test_hits@100_std": 0.0
+}
