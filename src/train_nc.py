@@ -147,6 +147,15 @@ def main(_):
         # For inductive learning, we use the train_data for training
         training_data = train_data.to(device)
         
+        # Move full_edge_index to the correct device if it exists
+        if hasattr(training_data, 'full_edge_index'):
+            training_data.full_edge_index = training_data.full_edge_index.to(device)
+            log.info(f"✓ full_edge_index moved to device: {device}")
+        if hasattr(val_data, 'full_edge_index'):
+            val_data.full_edge_index = val_data.full_edge_index.to(device)
+        if hasattr(test_data, 'full_edge_index'):
+            test_data.full_edge_index = test_data.full_edge_index.to(device)
+        
         # Create edge split structure for compatibility
         edge_split = {
             'train': {'edge': train_data.edge_index.t()},
@@ -210,11 +219,12 @@ def main(_):
         # Evaluate decoder
         if FLAGS.split_method == 'inductive':
             # For inductive evaluation, we need to evaluate on val and test sets
+            # Pass train_data which contains the correct bipartite metadata and full_edge_index
             results, _ = do_all_eval(
                 get_full_model_name(),
                 OUTPUT_DIR,
                 [FLAGS.link_pred_model],
-                val_data,  # Use validation data for evaluation
+                train_data,  # Use training data which has bipartite metadata and full_edge_index
                 edge_split,
                 embeddings,
                 dec_zoo,

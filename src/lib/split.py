@@ -12,6 +12,9 @@ def bipartite_negative_sampling(edge_index, data, num_neg_samples):
     """
     num_nodes_type_1 = data.num_nodes_type_1
     num_nodes_total = data.num_nodes
+    
+    # Ensure tensors are on the same device as edge_index
+    device = edge_index.device
 
     neg_edge_index = negative_sampling(
         edge_index=edge_index,
@@ -21,6 +24,11 @@ def bipartite_negative_sampling(edge_index, data, num_neg_samples):
     )
     # PyG puede devolver índices de destino relativos, así que los ajustamos al rango global
     neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
+    
+    # Ensure the result is on the correct device - FORCE device placement
+    if hasattr(edge_index, 'device'):
+        neg_edge_index = neg_edge_index.to(edge_index.device)
+    
     return neg_edge_index
 
 def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples):
@@ -39,6 +47,9 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
     num_nodes_type_1 = data.num_nodes_type_1
     num_nodes_total = data.num_nodes
     
+    # Ensure tensors are on the same device as full_edge_index
+    device = full_edge_index.device
+    
     log.info(f"Muestreo negativo inductivo: usando grafo completo con {full_edge_index.size(1)} aristas")
     
     neg_edge_index = negative_sampling(
@@ -49,6 +60,11 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
     )
     # Ajustar índices de destino al rango global
     neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
+    
+    # Ensure the result is on the correct device - FORCE device placement
+    if hasattr(full_edge_index, 'device'):
+        neg_edge_index = neg_edge_index.to(full_edge_index.device)
+    
     return neg_edge_index
 
 def generate_neg_edges(pos_edges, num_nodes, num_neg=None):

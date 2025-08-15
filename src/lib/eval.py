@@ -93,19 +93,21 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                 # Verificar si hay grafo completo para muestreo inductivo correcto
                 if hasattr(data, 'full_edge_index'):
                     log.info("Usando muestreo negativo inductivo correcto durante entrenamiento del decoder")
-                    neg_edges = bipartite_negative_sampling_inductive(data.full_edge_index, data, train_edge.size(0))
-                    neg_edges = neg_edges.t()  # Convert back to expected format
+                    neg_edge_index = bipartite_negative_sampling_inductive(data.full_edge_index, data, train_edge.size(0))
+                    neg_edges = neg_edge_index.t().to(device)  # Ensure correct device and format
                 else:
                     log.warning("Grafo completo no disponible. Usando muestreo bipartito estándar en decoder.")
-                    neg_edges = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
-                    neg_edges = neg_edges.t()  # Convert back to expected format
+                    neg_edge_index = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
+                    neg_edges = neg_edge_index.t().to(device)  # Ensure correct device and format
             else:
-                # Handle both dataset[0] and single dataset structures
-                if hasattr(dataset, 'num_nodes'):
-                    num_nodes = dataset.num_nodes
-                else:
-                    num_nodes = dataset[0].num_nodes
-                neg_edges = torch.randint(0, num_nodes, (train_edge.size(0), 2), device=device)
+                # Para grafos no bipartitos, usar negative_sampling estándar de PyG
+                neg_edge_index = negative_sampling(
+                    edge_index=train_edge.t(),
+                    num_nodes=data.num_nodes,
+                    num_neg_samples=train_edge.size(0),
+                    method='sparse'
+                )
+                neg_edges = neg_edge_index.t().to(device)
             neg_embeddings = torch.cat([
                 embeddings(neg_edges[:, 0]),
                 embeddings(neg_edges[:, 1])
