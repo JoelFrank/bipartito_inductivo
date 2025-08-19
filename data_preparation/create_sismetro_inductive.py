@@ -113,8 +113,9 @@ def create_sismetro_inductive_split():
         
         print(f"Aristas en {split_name}: {len(src_nodes)} originales, {edge_index.shape[1]} bidireccionales")
         
-        # Crear características de nodos (basadas en TODOS los datos para consistencia)
-        patrimonio_attrs = torch.zeros(num_patrimonios, len(all_tipos))
+        # Crear características de nodos - USANDO EMBEDDINGS (IDs enteros)
+        print("USANDO EMBEDDING IDs en lugar de one-hot encoding")
+        patrimonio_attrs = torch.zeros(num_patrimonios, 1, dtype=torch.long)
         
         # Llenar atributos basados en TODOS los datos históricos hasta este punto
         if split_name == "train":
@@ -131,10 +132,11 @@ def create_sismetro_inductive_split():
             if pd.notna(tipo_eq) and patrimonio in patrimonio_to_idx:
                 p_idx = patrimonio_to_idx[patrimonio]
                 t_idx = tipo_to_idx[tipo_eq]
-                patrimonio_attrs[p_idx, t_idx] = 1.0
+                patrimonio_attrs[p_idx, 0] = t_idx  # Asignar el índice del tipo
         
-        # Localizações sin atributos específicos
-        localizacao_attrs = torch.zeros(num_localizacoes, len(all_tipos))
+        # Los nodos de localização usan un índice especial (después de todos los tipos de equipamento)
+        # Para consistencia con el dataset principal
+        localizacao_attrs = torch.full((num_localizacoes, 1), len(all_tipos), dtype=torch.long)
         node_features = torch.cat([patrimonio_attrs, localizacao_attrs], dim=0)
         
         # Crear objeto Data
@@ -144,7 +146,9 @@ def create_sismetro_inductive_split():
             num_nodes=total_nodes,
             num_nodes_type_1=num_patrimonios,
             num_nodes_type_2=num_localizacoes,
-            full_edge_index=full_edge_index  # ✓ NUEVO: Grafo completo para muestreo negativo
+            full_edge_index=full_edge_index,  # ✓ NUEVO: Grafo completo para muestreo negativo
+            num_embedding_types=len(all_tipos) + 1,  # +1 para el índice especial de localizações
+            embedding_dim=None  # Se definirá en el modelo
         )
         
         # Calcular estadísticas de nodos presentes en este split

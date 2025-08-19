@@ -1,5 +1,42 @@
 import torch
+import torch.nn as nn
 import copy
+
+class EmbeddingProcessor(nn.Module):
+    """
+    Procesa características de embedding para nodos.
+    Convierte IDs de embedding a vectors densos.
+    """
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+    
+    def forward(self, x):
+        """
+        x: tensor de shape (num_nodes, 1) con IDs de embedding
+        Retorna: tensor de shape (num_nodes, embedding_dim)
+        """
+        if x.dim() == 2 and x.size(1) == 1:
+            # x contiene IDs de embedding
+            # DEBUG: Verificar índices antes del clamp
+            x_squeezed = x.squeeze(1)
+            max_val = x_squeezed.max().item()
+            min_val = x_squeezed.min().item()
+            
+            if max_val >= self.num_embeddings:
+                print(f"❌ ERROR DETECTADO: Índice {max_val} >= num_embeddings {self.num_embeddings}")
+                print(f"   Rango de índices en batch: [{min_val}, {max_val}]")
+                print(f"   Valores únicos: {torch.unique(x_squeezed).tolist()}")
+                print(f"   Num embeddings esperado: {self.num_embeddings} (rango válido: 0-{self.num_embeddings-1})")
+            
+            # Manejar valores -1 (sin tipo) convirtiéndolos a un índice válido
+            x_clean = torch.clamp(x_squeezed, 0, self.num_embeddings - 1)
+            return self.embedding(x_clean)
+        else:
+            # x ya son características dense (compatibilidad)
+            return x
 
 @torch.no_grad()
 def compute_data_representations_only(encoder, data, device, has_features):

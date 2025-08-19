@@ -17,7 +17,7 @@ def perform_triplet_training(data, output_dir, representation_size, device, inpu
     transform_2 = compose_transforms(FLAGS.graph_transforms, drop_edge_p=FLAGS.drop_edge_p_2, drop_feat_p=FLAGS.drop_feat_p_2)
     transform_3 = compose_transforms(FLAGS.negative_transforms) # Corruptions
 
-    encoder = g_zoo.get_model(FLAGS.graph_encoder_model, input_size, has_features, data.num_nodes)
+    encoder = g_zoo.get_model(FLAGS.graph_encoder_model, input_size, has_features, data.num_nodes, data)
     predictor = MlpPredictor(representation_size, representation_size, hidden_size=FLAGS.predictor_hidden_size)
     model = TripletBgrl(encoder, predictor, has_features=has_features).to(device)
     

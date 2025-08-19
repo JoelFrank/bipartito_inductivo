@@ -52,14 +52,31 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
     
     log.info(f"Muestreo negativo inductivo: usando grafo completo con {full_edge_index.size(1)} aristas")
     
+    # Usar la función original de PyG que funcionaba
     neg_edge_index = negative_sampling(
         edge_index=full_edge_index,  # ✓ CLAVE: usar grafo completo, no subset
         num_nodes=(num_nodes_type_1, num_nodes_total - num_nodes_type_1),
         num_neg_samples=num_neg_samples,
         method='sparse'
     )
+    
     # Ajustar índices de destino al rango global
     neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
+    
+    # Validar que los índices estén en rango correcto antes de devolver
+    sources = neg_edge_index[0, :]
+    targets = neg_edge_index[1, :]
+    
+    # Verificar rangos
+    valid_sources = (sources >= 0) & (sources < num_nodes_type_1)
+    valid_targets = (targets >= num_nodes_type_1) & (targets < num_nodes_total)
+    valid_mask = valid_sources & valid_targets
+    
+    # Filtrar solo los enlaces válidos
+    neg_edge_index = neg_edge_index[:, valid_mask]
+    
+    actual_generated = neg_edge_index.size(1)
+    log.info(f"Generados {actual_generated} enlaces negativos válidos de {num_neg_samples} solicitados")
     
     # Ensure the result is on the correct device - FORCE device placement
     if hasattr(full_edge_index, 'device'):
@@ -67,26 +84,60 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
     
     return neg_edge_index
 
-def generate_neg_edges(pos_edges, num_nodes, num_neg=None):
+def generate_neg_edges(pos_edges, num_nodes, num_neg=None, data=None):
     """
     Generate negative edges for evaluation.
+    For bipartite graphs, ensures negative edges are between different node types.
+    For inductive setting, avoids edges that exist in the full graph.
     """
     if num_neg is None:
         num_neg = pos_edges.size(1)
     
+    # Check if we have bipartite structure
+    is_bipartite = data is not None and hasattr(data, 'num_nodes_type_1')
+    
+    # Create set of existing edges (positive edges in current split)
     pos_edge_set = set()
     for i in range(pos_edges.size(1)):
         edge = tuple(sorted([pos_edges[0, i].item(), pos_edges[1, i].item()]))
         pos_edge_set.add(edge)
     
+    # For inductive setting, also avoid edges from full graph
+    full_edge_set = set()
+    if data is not None and hasattr(data, 'full_edge_index'):
+        for i in range(data.full_edge_index.size(1)):
+            edge = tuple(sorted([data.full_edge_index[0, i].item(), data.full_edge_index[1, i].item()]))
+            full_edge_set.add(edge)
+        log.info(f"Muestreo negativo inductivo: evitando {len(full_edge_set)} enlaces del grafo completo")
+    
     neg_edges = []
-    while len(neg_edges) < num_neg:
-        i = np.random.randint(0, num_nodes)
-        j = np.random.randint(0, num_nodes)
-        if i != j:
-            edge = tuple(sorted([i, j]))
-            if edge not in pos_edge_set:
-                neg_edges.append([i, j])
+    max_attempts = num_neg * 100  # Prevent infinite loops
+    attempts = 0
+    
+    while len(neg_edges) < num_neg and attempts < max_attempts:
+        attempts += 1
+        
+        if is_bipartite:
+            # For bipartite graphs: sample from different node types
+            # Type 1: [0, num_nodes_type_1), Type 2: [num_nodes_type_1, num_nodes)
+            type1_node = np.random.randint(0, data.num_nodes_type_1)
+            type2_node = np.random.randint(data.num_nodes_type_1, num_nodes)
+            i, j = type1_node, type2_node
+        else:
+            # For regular graphs: sample any two different nodes
+            i = np.random.randint(0, num_nodes)
+            j = np.random.randint(0, num_nodes)
+            if i == j:
+                continue
+        
+        edge = tuple(sorted([i, j]))
+        
+        # Check if edge is valid (not in positive set and not in full graph if inductive)
+        if edge not in pos_edge_set and edge not in full_edge_set:
+            neg_edges.append([i, j])
+    
+    if len(neg_edges) < num_neg:
+        log.warning(f"Solo se pudieron generar {len(neg_edges)} enlaces negativos de {num_neg} solicitados")
     
     return torch.tensor(neg_edges, dtype=torch.long).t()
 

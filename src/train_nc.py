@@ -127,6 +127,36 @@ def main(_):
         val_data = torch.load(val_path)
         test_data = torch.load(test_path)
         
+        # LIMPIEZA: Deduplicar enlaces en los datos cargados
+        log.info("Limpiando duplicados en datos inductivos...")
+        
+        def clean_data_edges(data, name):
+            original_count = data.edge_index.shape[1]
+            # Convert to [num_edges, 2] format for cleaning
+            edges_2d = data.edge_index.t()
+            
+            # Remove duplicates
+            edge_set = set()
+            clean_edges = []
+            
+            for edge in edges_2d:
+                edge_tuple = tuple(sorted([edge[0].item(), edge[1].item()]))
+                if edge_tuple not in edge_set:
+                    edge_set.add(edge_tuple)
+                    # Always store in consistent direction (smaller -> larger for undirected)
+                    clean_edges.append([edge[0].item(), edge[1].item()])
+            
+            # Update data object
+            if clean_edges:
+                data.edge_index = torch.tensor(clean_edges).t().long()
+                log.info(f"  {name}: {original_count} -> {len(clean_edges)} enlaces únicos")
+            else:
+                log.error(f"  ❌ {name}: No se encontraron enlaces válidos")
+        
+        clean_data_edges(train_data, "Train")
+        clean_data_edges(val_data, "Val") 
+        clean_data_edges(test_data, "Test")
+        
         # Cargar metadatos para obtener el grafo completo (muestreo negativo inductivo)
         metadata_path = os.path.join(FLAGS.dataset_dir, 'processed', f'{FLAGS.dataset}_metadata.pt')
         if os.path.exists(metadata_path):
@@ -166,9 +196,38 @@ def main(_):
         }
         
         # Generate negative edges for evaluation
+        log.info("Generando enlaces negativos para evaluación...")
         from lib.split import generate_neg_edges
-        edge_split['valid']['edge_neg'] = generate_neg_edges(val_data.edge_index, val_data.num_nodes)
-        edge_split['test']['edge_neg'] = generate_neg_edges(test_data.edge_index, test_data.num_nodes)
+        
+        log.info(f"Val data: {val_data.edge_index.shape[1]} enlaces positivos")
+        # CORRECCIÓN: usar edge_index original (formato [2, num_edges]) para generate_neg_edges
+        edge_split['valid']['edge_neg'] = generate_neg_edges(
+            val_data.edge_index, val_data.num_nodes, 
+            num_neg=val_data.edge_index.shape[1], data=val_data
+        ).t()  # Transponer resultado para mantener consistencia con edge_split format [num_edges, 2]
+        log.info(f"✓ Val negativos generados usando full_edge_index: {edge_split['valid']['edge_neg'].shape}")
+        
+        log.info(f"Test data: {test_data.edge_index.shape[1]} enlaces positivos")
+        # CORRECCIÓN: usar edge_index original (formato [2, num_edges]) para generate_neg_edges
+        edge_split['test']['edge_neg'] = generate_neg_edges(
+            test_data.edge_index, test_data.num_nodes, 
+            num_neg=test_data.edge_index.shape[1], data=test_data
+        ).t()  # Transponer resultado para mantener consistencia con edge_split format [num_edges, 2]
+        log.info(f"✓ Test negativos generados usando full_edge_index: {edge_split['test']['edge_neg'].shape}")
+        
+        # Diagnóstico adicional
+        log.info(f"Diagnóstico de enlaces negativos:")
+        log.info(f"  - Positivos val: {edge_split['valid']['edge'].shape}")
+        log.info(f"  - Negativos val: {edge_split['valid']['edge_neg'].shape}")
+        log.info(f"  - Positivos test: {edge_split['test']['edge'].shape}")
+        log.info(f"  - Negativos test: {edge_split['test']['edge_neg'].shape}")
+        log.info(f"  - Full graph edges: {val_data.full_edge_index.shape[1]}")
+        
+        # Verificar que los negativos no estén vacíos
+        if edge_split['test']['edge_neg'].shape[0] == 0:
+            log.error("❌ No se generaron enlaces negativos para test!")
+        elif edge_split['test']['edge_neg'].shape[0] < edge_split['test']['edge'].shape[0]:
+            log.warning(f"⚠️ Pocos enlaces negativos: {edge_split['test']['edge_neg'].shape[0]} vs {edge_split['test']['edge'].shape[0]} positivos")
         
         # Update data to use training data structure
         data = train_data

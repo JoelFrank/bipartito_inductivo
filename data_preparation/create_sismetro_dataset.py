@@ -106,17 +106,18 @@ def create_sismetro_bipartite_graph(excel_path, save_dir, dataset_name="sismetro
     print(f"Total de aristas originales: {len(src_nodes)}")
     print(f"Tamaño final de edge_index (bidireccional): {edge_index.shape}")
     
-    # Crear atributos de nodos para patrimônios (tipo de equipamento)
+    # Crear atributos de nodos para patrimônios (tipo de equipamento) - USANDO EMBEDDINGS
     # Primero, crear un mapeo de tipos de equipamento
     unique_tipos = sorted(df_clean[tipo_equipamento_col].dropna().unique())
     tipo_to_idx = {tipo: i for i, tipo in enumerate(unique_tipos)}
     
     print(f"Tipos de equipamento únicos: {len(unique_tipos)}")
+    print("USANDO EMBEDDING IDs en lugar de one-hot encoding")
     
-    # Crear atributos para cada nodo de patrimônio
-    patrimonio_attrs = torch.zeros(num_patrimonios, len(unique_tipos))
+    # Crear atributos para cada nodo de patrimônio - CAMBIO: usar índices en lugar de one-hot
+    patrimonio_attrs = torch.full((num_patrimonios, 1), -1, dtype=torch.long)  # -1 para "sin tipo"
     
-    # Para cada patrimônio, encontrar sus tipos de equipamento
+    # Para cada patrimônio, asignar el índice de su tipo de equipamento principal
     for _, row in df_clean.iterrows():
         patrimonio = row[patrimonio_col]
         tipo_eq = row[tipo_equipamento_col]
@@ -124,10 +125,11 @@ def create_sismetro_bipartite_graph(excel_path, save_dir, dataset_name="sismetro
         if pd.notna(tipo_eq) and patrimonio in patrimonio_to_idx:
             p_idx = patrimonio_to_idx[patrimonio]
             t_idx = tipo_to_idx[tipo_eq]
-            patrimonio_attrs[p_idx, t_idx] = 1.0
+            patrimonio_attrs[p_idx, 0] = t_idx  # Asignar el índice del tipo
     
-    # Los nodos de localização no tienen atributos específicos
-    localizacao_attrs = torch.zeros(num_localizacoes, len(unique_tipos))
+    # Los nodos de localização no tienen tipos específicos (usarán índice especial)
+    num_embedding_types = len(unique_tipos) + 1 # +1 para índice especial de localizações
+    localizacao_attrs = torch.full((num_localizacoes, 1), len(unique_tipos), dtype=torch.long)  # Índice especial para localizações
     
     # Concatenar atributos de ambos tipos de nodos
     node_features = torch.cat([patrimonio_attrs, localizacao_attrs], dim=0)
@@ -140,7 +142,9 @@ def create_sismetro_bipartite_graph(excel_path, save_dir, dataset_name="sismetro
         edge_index=edge_index,
         num_nodes=num_patrimonios + num_localizacoes,
         num_nodes_type_1=num_patrimonios,  # patrimônios
-        num_nodes_type_2=num_localizacoes   # localizações
+        num_nodes_type_2=num_localizacoes,   # localizações
+        num_embedding_types=num_embedding_types,  # Para la capa de embedding
+        embedding_dim=None  # Se definirá en el modelo
     )
     
     # Guardar mappings adicionales para referencia
@@ -182,8 +186,10 @@ if __name__ == '__main__':
             print(f"Nodos tipo 1 (Patrimônios): {data.num_nodes_type_1}")
             print(f"Nodos tipo 2 (Localizações): {data.num_nodes_type_2}")
             print(f"Aristas totales: {data.edge_index.shape[1]}")
-            print(f"Características por nodo: {data.x.shape[1]}")
+            print(f"Forma de atributos: {data.x.shape}")
+            print(f"Tipos de embedding únicos: {data.num_embedding_types}")
             print(f"Tipos de equipamento únicos: {len(data.unique_tipos)}")
+            print("NOTA: Usando embedding IDs (enteros) en lugar de one-hot vectors")
             
             # Mostrar algunos ejemplos
             print(f"\nEjemplos de patrimônios: {data.unique_patrimonios[:5]}")

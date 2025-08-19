@@ -28,7 +28,7 @@ def define_flags(model_group: ModelGroup):
     flags.DEFINE_integer('num_runs', 1, 'Number of runs')
     
     # Model architecture flags
-    flags.DEFINE_enum('graph_encoder_model', 'gcn', ['gcn'], 'Graph encoder model')
+    flags.DEFINE_enum('graph_encoder_model', 'gcn', ['gcn', 'bipartite_sage'], 'Graph encoder model')
     flags.DEFINE_list('graph_encoder_layer_dims', [128, 128], 'Graph encoder layer dimensions')
     flags.DEFINE_integer('link_mlp_hidden_size', 128, 'Link MLP hidden size')
     flags.DEFINE_integer('predictor_hidden_size', 256, 'Predictor hidden size')
