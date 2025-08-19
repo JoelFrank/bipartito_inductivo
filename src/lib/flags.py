@@ -20,7 +20,8 @@ def define_flags(model_group: ModelGroup):
     flags.DEFINE_boolean('temporal_split', False, 'Use temporal split for inductive learning')
     
     # Training flags
-    flags.DEFINE_float('lr', 0.008, 'Learning rate')
+    flags.DEFINE_float('lr', 0.005, 'Learning rate')
+    flags.DEFINE_float('link_mlp_lr', 0.001, 'Learning rate for link prediction MLP decoder')
     flags.DEFINE_integer('epochs', 5000, 'Number of epochs')
     flags.DEFINE_integer('lr_warmup_epochs', 500, 'Learning rate warmup epochs')
     flags.DEFINE_integer('decoder_epochs', 100, 'Number of epochs for decoder training')

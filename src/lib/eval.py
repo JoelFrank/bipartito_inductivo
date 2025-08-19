@@ -290,6 +290,15 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             else:
                 emb_tensor = embeddings.weight
             
+            # ==============================================================================
+            # AÑADIR NORMALIZACIÓN: Escala los vectores para que tengan longitud 1
+            # QUÉ HACE: Normaliza los embeddings para estabilizar el entrenamiento
+            # POR QUÉ: Evita que magnitudes extremas desestabilicen el decodificador
+            # ==============================================================================
+            import torch.nn.functional as F
+            emb_tensor = F.normalize(emb_tensor, p=2, dim=1)
+            # ==============================================================================
+            
             if is_src_type:
                 # Source nodes (patrimonio) are first
                 return emb_tensor[node_ids]
@@ -298,13 +307,27 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                 return emb_tensor[num_patrimonio + node_ids]
         else:
             # Regular homogeneous embeddings
-            return embeddings(node_ids)
+            # ==============================================================================
+            # AÑADIR NORMALIZACIÓN para grafos homogéneos también
+            # ==============================================================================
+            import torch.nn.functional as F
+            if hasattr(embeddings, 'weight'):
+                emb_tensor = F.normalize(embeddings.weight, p=2, dim=1)
+                return emb_tensor[node_ids]
+            else:
+                emb = embeddings(node_ids)
+                return F.normalize(emb, p=2, dim=1)
+            # ==============================================================================
     
     for model_type in valid_models:
         decoder = decoder_zoo.get_model(model_type, embeddings.embedding_dim).to(device)
         
-        # Train decoder
-        optimizer = torch.optim.Adam(decoder.parameters(), lr=0.01)
+        # ==============================================================================
+        # CAMBIO CRÍTICO: Usar el learning rate específico del decodificador
+        # QUÉ HACE: Cambia lr=0.01 hardcodeado por FLAGS.link_mlp_lr configurable
+        # POR QUÉ: Permite ajuste fino. Un lr alto en el decodificador causa colapso
+        # ==============================================================================
+        optimizer = torch.optim.Adam(decoder.parameters(), lr=FLAGS.link_mlp_lr)
         criterion = torch.nn.BCEWithLogitsLoss()
         
         for epoch in range(FLAGS.decoder_epochs):  # Use configurable decoder epochs
