@@ -10,20 +10,37 @@ def bipartite_negative_sampling(edge_index, data, num_neg_samples):
     Función de ayuda para el muestreo negativo en grafos bipartitos.
     Garantiza que los enlaces negativos se generen solo entre las dos particiones.
     """
-    num_nodes_type_1 = data.num_nodes_type_1
-    num_nodes_total = data.num_nodes
+    from torch_geometric.data import HeteroData
+    
+    # Detectar si es HeteroData o grafo bipartito estándar
+    if isinstance(data, HeteroData):
+        # Para HeteroData, obtener número de nodos de cada tipo
+        node_types = list(data.node_types)
+        if len(node_types) == 2:
+            num_nodes_tuple = (data[node_types[0]].num_nodes, data[node_types[1]].num_nodes)
+        else:
+            # Asumir los primeros dos tipos
+            num_nodes_tuple = (data[node_types[0]].num_nodes, data[node_types[1]].num_nodes)
+    else:
+        # Para grafos bipartitos estándar
+        num_nodes_type_1 = data.num_nodes_type_1
+        num_nodes_total = data.num_nodes
+        num_nodes_tuple = (num_nodes_type_1, num_nodes_total - num_nodes_type_1)
     
     # Ensure tensors are on the same device as edge_index
     device = edge_index.device
 
+    # ==============================================================================
+    # CAMBIO 5: Muestreo negativo bipartito usando tupla de nodos
+    # QUÉ HACE: Pasa una tupla (num_src, num_dst) a negative_sampling
+    # POR QUÉ: Para que PyG genere únicamente negativos válidos (src-dst)
+    # ==============================================================================
     neg_edge_index = negative_sampling(
         edge_index=edge_index,
-        num_nodes=(num_nodes_type_1, num_nodes_total - num_nodes_type_1),  # Tupla para muestreo bipartito
+        num_nodes=num_nodes_tuple,  # Tupla para muestreo bipartito
         num_neg_samples=num_neg_samples,
         method='sparse'
     )
-    # PyG puede devolver índices de destino relativos, así que los ajustamos al rango global
-    neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
     
     # Ensure the result is on the correct device - FORCE device placement
     if hasattr(edge_index, 'device'):
@@ -44,39 +61,41 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
     Returns:
         neg_edge_index: Enlaces negativos que NO existen en el grafo completo
     """
-    num_nodes_type_1 = data.num_nodes_type_1
-    num_nodes_total = data.num_nodes
+    from torch_geometric.data import HeteroData
+    
+    # Detectar si es HeteroData o grafo bipartito estándar
+    if isinstance(data, HeteroData):
+        # Para HeteroData, obtener número de nodos de cada tipo
+        node_types = list(data.node_types)
+        if len(node_types) == 2:
+            num_nodes_tuple = (data[node_types[0]].num_nodes, data[node_types[1]].num_nodes)
+        else:
+            # Asumir los primeros dos tipos
+            num_nodes_tuple = (data[node_types[0]].num_nodes, data[node_types[1]].num_nodes)
+    else:
+        # Para grafos bipartitos estándar
+        num_nodes_type_1 = data.num_nodes_type_1
+        num_nodes_total = data.num_nodes
+        num_nodes_tuple = (num_nodes_type_1, num_nodes_total - num_nodes_type_1)
     
     # Ensure tensors are on the same device as full_edge_index
     device = full_edge_index.device
     
     log.info(f"Muestreo negativo inductivo: usando grafo completo con {full_edge_index.size(1)} aristas")
     
-    # Usar la función original de PyG que funcionaba
+    # ==============================================================================
+    # CAMBIO 5: Muestreo negativo bipartito inductivo usando tupla de nodos
+    # QUÉ HACE: Usar la función original de PyG con tupla de nodos
+    # POR QUÉ: Para que genere únicamente negativos válidos (src-dst) que no existan en el grafo completo
+    # ==============================================================================
     neg_edge_index = negative_sampling(
         edge_index=full_edge_index,  # ✓ CLAVE: usar grafo completo, no subset
-        num_nodes=(num_nodes_type_1, num_nodes_total - num_nodes_type_1),
+        num_nodes=num_nodes_tuple,
         num_neg_samples=num_neg_samples,
         method='sparse'
     )
     
-    # Ajustar índices de destino al rango global
-    neg_edge_index[1, :] = neg_edge_index[1, :] % (num_nodes_total - num_nodes_type_1) + num_nodes_type_1
-    
-    # Validar que los índices estén en rango correcto antes de devolver
-    sources = neg_edge_index[0, :]
-    targets = neg_edge_index[1, :]
-    
-    # Verificar rangos
-    valid_sources = (sources >= 0) & (sources < num_nodes_type_1)
-    valid_targets = (targets >= num_nodes_type_1) & (targets < num_nodes_total)
-    valid_mask = valid_sources & valid_targets
-    
-    # Filtrar solo los enlaces válidos
-    neg_edge_index = neg_edge_index[:, valid_mask]
-    
-    actual_generated = neg_edge_index.size(1)
-    log.info(f"Generados {actual_generated} enlaces negativos válidos de {num_neg_samples} solicitados")
+    log.info(f"Generados {neg_edge_index.size(1)} enlaces negativos válidos")
     
     # Ensure the result is on the correct device - FORCE device placement
     if hasattr(full_edge_index, 'device'):

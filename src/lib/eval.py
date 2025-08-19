@@ -4,7 +4,7 @@ import pandas as pd
 import os
 from sklearn.metrics import roc_auc_score, average_precision_score, precision_score, recall_score, f1_score
 from torch_geometric.utils import negative_sampling
-from torch_geometric.data import HeteroData
+from torch_geometric.data import HeteroData  # Importar HeteroData
 import logging
 from absl import flags
 
@@ -326,6 +326,13 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             
             # Negative edges (sample random) - CORRECCIÓN: usar muestreo bipartito-consciente
             if is_bipartite:
+                # ==============================================================================
+                # CAMBIO 4: Muestreo negativo bipartito en el entrenamiento del decodificador
+                # QUÉ HACE: Si el grafo es bipartito, le pasa el número de nodos de cada
+                # tipo a `negative_sampling`.
+                # POR QUÉ: Para que el decodificador aprenda a distinguir aristas positivas
+                # de negativas válidas (pares src-dst no conectados).
+                # ==============================================================================
                 # Verificar si hay grafo completo para muestreo inductivo correcto
                 if hasattr(data, 'full_edge_index'):
                     log.info("Usando muestreo negativo inductivo correcto durante entrenamiento del decoder")
@@ -342,7 +349,12 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                     if is_hetero:
                         edge_type = ('patrimonio', 'located_at', 'localizacao')
                         edge_index = data[edge_type].edge_index
-                        neg_edge_index = bipartite_negative_sampling(edge_index, data, train_edge.size(0))
+                        num_nodes_tuple = (data['patrimonio'].num_nodes, data['localizacao'].num_nodes)
+                        neg_edge_index = negative_sampling(
+                            edge_index=edge_index,
+                            num_nodes=num_nodes_tuple,
+                            num_neg_samples=train_edge.size(0)
+                        )
                     else:
                         neg_edge_index = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
                     neg_edges = neg_edge_index.t().to(device)  # Ensure correct device and format

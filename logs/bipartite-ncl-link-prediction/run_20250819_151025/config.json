@@ -35,9 +35,9 @@
   "link_mlp_hidden_size": 128,
   "predictor_hidden_size": 256,
   "link_pred_model": "prod_mlp",
-  "adjust_layer_sizes": true,
-  "batch_links": true,
-  "trivial_neg_sampling": true,
+  "adjust_layer_sizes": false,
+  "batch_links": false,
+  "trivial_neg_sampling": false,
   "graph_transforms": [
     "drop-edges",
     "drop-features"

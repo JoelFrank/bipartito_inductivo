@@ -30,48 +30,63 @@ class DropEdges:
             return data
 
 class DropFeatures:
-    def __init__(self, p):
+    r"""Drops node features with probability p."""
+    def __init__(self, p=None):
+        assert p is not None
+        assert 0.0 < p < 1.0, (
+            'Dropout probability has to be between 0 and 1, but got %.2f' % p
+        )
         self.p = p
-    
-    def __call__(self, data):
-        data = data.clone()
-        if isinstance(data, HeteroData):
-            # Bipartite-aware feature dropping
-            for node_type in data.node_types:
-                if data[node_type].x is not None:
-                    drop_mask = torch.empty((data[node_type].x.size(1),), 
-                                          dtype=torch.float32, 
-                                          device=data[node_type].x.device).uniform_(0, 1) < self.p
-                    data[node_type].x[:, drop_mask] = 0
-        else:
-            # Original homogeneous behavior
-            if data.x is not None:
-                drop_mask = torch.empty((data.x.size(1),), dtype=torch.float32, device=data.x.device).uniform_(0, 1) < self.p
-                data.x[:, drop_mask] = 0
-        return data
 
-class ScrambleFeatures:
-    """Scramble node features within each node type (bipartite-aware)"""
-    def __init__(self, p=1.0):
-        self.p = p  # Probability of scrambling features
-    
     def __call__(self, data):
         data = data.clone()
+        # SI ES BIPARTITO (HETERODATA)
         if isinstance(data, HeteroData):
-            # Bipartite-aware feature scrambling
             for node_type in data.node_types:
                 if data[node_type].x is not None:
                     x = data[node_type].x
-                    if torch.rand(1).item() < self.p:
-                        # Randomly permute features within each node type
-                        perm_idx = torch.randperm(x.size(0))
-                        data[node_type].x = x[perm_idx]
-        else:
-            # Original homogeneous behavior
-            if data.x is not None and torch.rand(1).item() < self.p:
-                perm_idx = torch.randperm(data.x.size(0))
-                data.x = data.x[perm_idx]
+                    drop_mask = (
+                        torch.empty((x.size(1),), dtype=torch.float32, device=x.device)
+                        .uniform_(0, 1)
+                        < self.p
+                    )
+                    x[:, drop_mask] = 0
+                    data[node_type].x = x
+            return data
+
+        # Lógica original para grafos homogéneos
+        if data.x is not None:
+            drop_mask = (
+                torch.empty(
+                    (data.x.size(1),), dtype=torch.float32, device=data.x.device
+                ).uniform_(0, 1)
+                < self.p
+            )
+            data.x[:, drop_mask] = 0
         return data
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(p={self.p})'
+
+class ScrambleFeatures:
+    r"""Randomly scrambles the rows of the feature matrix."""
+    def __call__(self, data):
+        data = data.clone()
+        if isinstance(data, HeteroData):
+            for node_type in data.node_types:
+                if data[node_type].x is not None:
+                    row_perm = torch.randperm(data[node_type].x.size(0))
+                    data[node_type].x = data[node_type].x[row_perm, :]
+            return data
+
+        # Lógica original
+        if data.x is not None:
+            row_perm = torch.randperm(data.x.size(0))
+            data.x = data.x[row_perm, :]
+        return data
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}()'
 
 class AddEdges:
     """Add random edges while respecting bipartite structure"""
@@ -115,36 +130,29 @@ class AddEdges:
         return data
 
 class RandomEdges:
-    def __init__(self):
-        pass
-    
+    r"""Completely randomize the edge index"""
     def __call__(self, data):
         data = data.clone()
         if isinstance(data, HeteroData):
-            # For bipartite graphs, replace edges while maintaining structure
             for edge_type in data.edge_types:
                 src_type, _, dst_type = edge_type
                 num_src_nodes = data[src_type].num_nodes
                 num_dst_nodes = data[dst_type].num_nodes
                 num_edges = data[edge_type].edge_index.size(1)
                 
-                # Generate completely random edges
-                row = torch.randint(0, num_src_nodes, (num_edges,))
-                col = torch.randint(0, num_dst_nodes, (num_edges,))
-                data[edge_type].edge_index = torch.stack([row, col], dim=0)
-        else:
-            # Original homogeneous behavior
-            num_nodes = data.num_nodes
-            num_edges = data.edge_index.size(1) // 2  # Assuming undirected graph
-            
-            # Generate random edges
-            row = torch.randint(0, num_nodes, (num_edges,))
-            col = torch.randint(0, num_nodes, (num_edges,))
-            
-            # Create bidirectional edges
-            edge_index = torch.stack([torch.cat([row, col]), torch.cat([col, row])], dim=0)
-            data.edge_index = edge_index
+                src_indices = torch.randint(0, num_src_nodes, (num_edges,), device=data[edge_type].edge_index.device)
+                dst_indices = torch.randint(0, num_dst_nodes, (num_edges,), device=data[edge_type].edge_index.device)
+                
+                data[edge_type].edge_index = torch.stack([src_indices, dst_indices])
+            return data
+
+        # Lógica original
+        n = data.num_nodes
+        data.edge_index = torch.randint_like(data.edge_index, n - 1)
         return data
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}()'
 
 def compose_transforms(transform_names, **kwargs):
     """Compose multiple transforms with bipartite support"""
@@ -159,7 +167,7 @@ def compose_transforms(transform_names, **kwargs):
         elif name == 'drop-features':
             transforms.append(DropFeatures(kwargs.get('drop_feat_p', 0.2)))
         elif name == 'scramble-features':
-            transforms.append(ScrambleFeatures(kwargs.get('scramble_feat_p', 1.0)))
+            transforms.append(ScrambleFeatures())
         elif name == 'add-edges':
             transforms.append(AddEdges(kwargs.get('add_edge_p', 0.1)))
         elif name == 'random-edges':
