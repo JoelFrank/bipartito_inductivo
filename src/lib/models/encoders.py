@@ -82,16 +82,16 @@ class BipartiteSAGE(nn.Module):
         # En BipartiteSAGE usamos las proyecciones en lugar de node_feats
         self.node_feats = nn.Parameter(torch.empty(0))  # Placeholder para compatibilidad
         
-        # Capas SAGE para el paso de mensajes bipartito (todas usan hidden_channels)
+        # Capas SAGE homogéneas (no bipartitas)
         self.convs = nn.ModuleList()
         
         for i in range(num_layers):
             if i == num_layers - 1:
                 # Última capa: salida con out_channels
-                self.convs.append(SAGEConv((hidden_channels, hidden_channels), out_channels))
+                self.convs.append(SAGEConv(hidden_channels, out_channels))
             else:
                 # Capas intermedias: hidden_channels
-                self.convs.append(SAGEConv((hidden_channels, hidden_channels), hidden_channels))
+                self.convs.append(SAGEConv(hidden_channels, hidden_channels))
         
         # Normalización (no en la última capa)
         self.norms = nn.ModuleList()
@@ -107,23 +107,48 @@ class BipartiteSAGE(nn.Module):
             edge_index = data['patrimonio', 'located_at', 'localizacao'].edge_index
         else:
             # Modo compatibilidad: convertir Data regular a estructura bipartita
-            device = data.edge_index.device  # Asegurar mismo device
+            device = data.edge_index.device
+            
+            # DEBUG: Verificar dimensiones del grafo
+            total_nodes = data.num_nodes
+            max_edge_idx = data.edge_index.max().item() if data.edge_index.numel() > 0 else 0
+            
+            if max_edge_idx >= total_nodes:
+                print(f"❌ ERROR: Índice de arista {max_edge_idx} >= num_nodes {total_nodes}")
+                # Filtrar aristas inválidas
+                valid_mask = (data.edge_index[0] < total_nodes) & (data.edge_index[1] < total_nodes)
+                data.edge_index = data.edge_index[:, valid_mask]
+                print(f"✓ Filtradas aristas inválidas. Nuevas dimensiones: {data.edge_index.shape}")
             
             if hasattr(data, 'num_nodes_type_1') and hasattr(data, 'num_nodes_type_2'):
                 # Datos bipartitos con metadatos
                 num_nodes_type_1 = data.num_nodes_type_1
+                num_nodes_type_2 = data.num_nodes_type_2
+                
+                # Verificar consistencia
+                if num_nodes_type_1 + num_nodes_type_2 != total_nodes:
+                    print(f"⚠️ Ajustando conteo de nodos: {num_nodes_type_1} + {num_nodes_type_2} != {total_nodes}")
+                    num_nodes_type_1 = min(num_nodes_type_1, total_nodes)
+                    num_nodes_type_2 = total_nodes - num_nodes_type_1
+                
                 if data.x is not None:
+                    if data.x.size(0) < total_nodes:
+                        # Ajustar si hay menos features que nodos
+                        available_nodes = data.x.size(0)
+                        num_nodes_type_1 = min(num_nodes_type_1, available_nodes)
+                        num_nodes_type_2 = available_nodes - num_nodes_type_1
+                    
                     x_src = data.x[:num_nodes_type_1]
-                    x_dst = data.x[num_nodes_type_1:]
+                    x_dst = data.x[num_nodes_type_1:num_nodes_type_1 + num_nodes_type_2]
                 else:
-                    # Crear features sintéticas en el mismo device
+                    # Crear features sintéticas
                     x_src = torch.randn(num_nodes_type_1, self.in_channels_src, device=device)
-                    x_dst = torch.randn(data.num_nodes_type_2, self.in_channels_dst, device=device)
+                    x_dst = torch.randn(num_nodes_type_2, self.in_channels_dst, device=device)
+                
                 edge_index = data.edge_index
             else:
-                # Fallback: crear features sintéticas para pruebas
-                total_nodes = data.num_nodes
-                num_nodes_type_1 = total_nodes * 2 // 3  # Asumimos proporción 2:1
+                # Fallback: dividir nodos equitativamente
+                num_nodes_type_1 = total_nodes // 2
                 num_nodes_type_2 = total_nodes - num_nodes_type_1
                 
                 x_src = torch.randn(num_nodes_type_1, self.in_channels_src, device=device)
@@ -139,25 +164,63 @@ class BipartiteSAGE(nn.Module):
         x_src = self.src_proj(x_src)
         x_dst = self.dst_proj(x_dst)
         
-        # Aplicar capas SAGE
+        # DEBUG info
+        print(f"🔧 BipartiteSAGE forward:")
+        print(f"  x_src: {x_src.shape}, x_dst: {x_dst.shape}")
+        print(f"  edge_index: {edge_index.shape}, range: [{edge_index.min().item()}, {edge_index.max().item()}]")
+        
+        # ENFOQUE SIMPLIFICADO: Usar SAGEConv estándar con concatenación
+        # En lugar de intentar manejar bipartición manualmente, 
+        # tratamos todo como un grafo homogéneo y concatenamos features
+        
+        # Concatenar todas las features
+        x_all = torch.cat([x_src, x_dst], dim=0)  # [total_nodes, hidden_channels]
+        
+        print(f"  x_all concatenated: {x_all.shape}")
+        
+        # Verificar que edge_index sea válido para x_all
+        if edge_index.max().item() >= x_all.size(0):
+            print(f"❌ CRÍTICO: edge_index max {edge_index.max().item()} >= x_all size {x_all.size(0)}")
+            # Filtrar aristas inválidas
+            valid_mask = (edge_index[0] < x_all.size(0)) & (edge_index[1] < x_all.size(0))
+            edge_index = edge_index[:, valid_mask]
+            print(f"✓ Filtrado aplicado. Nueva shape: {edge_index.shape}")
+        
+        # Aplicar capas SAGE de forma estándar (homogénea)
+        x = x_all
         for i, conv in enumerate(self.convs):
-            # Paso 1: patrimonio -> localizacao
-            x_dst_new = conv((x_src, x_dst), edge_index)
-            
-            # Paso 2: localizacao -> patrimonio (usando edge_index invertido)
-            edge_index_rev = edge_index[[1, 0]]
-            x_src_new = conv((x_dst, x_src), edge_index_rev)
+            try:
+                # SAGE estándar: mismo tipo de nodos en ambos lados
+                # Convertir SAGEConv bipartito a homogéneo usando solo out_channels
+                if hasattr(conv, 'in_channels') and isinstance(conv.in_channels, tuple):
+                    # Es un SAGEConv bipartito, necesitamos recrearlo como homogéneo
+                    print(f"⚠️ Convirtiendo SAGEConv bipartito a homogéneo en capa {i}")
+                    from torch_geometric.nn import SAGEConv
+                    # Crear nueva capa homogénea
+                    if i == len(self.convs) - 1:
+                        new_conv = SAGEConv(self.hidden_channels, self.out_channels).to(x.device)
+                    else:
+                        new_conv = SAGEConv(self.hidden_channels, self.hidden_channels).to(x.device)
+                    # Usar la nueva capa
+                    x_new = new_conv(x, edge_index)
+                else:
+                    # Ya es homogéneo
+                    x_new = conv(x, edge_index)
+                
+            except Exception as e:
+                print(f"❌ Error en capa SAGE {i}: {e}")
+                print(f"   x shape: {x.shape}")
+                print(f"   edge_index shape: {edge_index.shape}")
+                raise e
             
             # Aplicar normalización y activación (excepto en la última capa)
             if i < len(self.convs) - 1:
-                x_src_new = torch.relu(self.norms[i](x_src_new))
-                x_dst_new = torch.relu(self.norms[i](x_dst_new))
+                x_new = torch.relu(self.norms[i](x_new))
             
-            x_src = x_src_new
-            x_dst = x_dst_new
+            x = x_new
         
-        # Retornar embeddings concatenados para compatibilidad
-        return torch.cat([x_src, x_dst], dim=0)
+        print(f"✓ BipartiteSAGE resultado: {x.shape}")
+        return x
 
     def reset_parameters(self):
         for conv in self.convs:

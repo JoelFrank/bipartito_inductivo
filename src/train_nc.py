@@ -23,33 +23,55 @@ def process_config_file():
     """Process config file before main execution"""
     config_processed = False
     if len(sys.argv) > 1:
-        # Look for --config_file in command line args
+        # Look for --config_file in command line args (handle both formats)
+        config_path = None
+        config_arg_indices = []
+        
         for i, arg in enumerate(sys.argv):
             if arg == '--config_file' and i + 1 < len(sys.argv):
                 config_path = sys.argv[i + 1]
-                if os.path.exists(config_path) and not config_processed:
-                    # Read config file and insert flags into sys.argv
-                    with open(config_path, 'r') as f:
-                        config_flags = []
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith('#'):
-                                if '=' in line:
-                                    key, value = line.split('=', 1)
-                                    if not key.startswith('--'):
-                                        key = '--' + key
-                                    config_flags.extend([key, value])
-                                elif line.startswith('--'):
-                                    parts = line.split(' ', 1)
-                                    if len(parts) == 2:
-                                        config_flags.extend(parts)
-                                    else:
-                                        config_flags.append(line)
-                    
-                    # Insert config flags before the config_file argument, remove duplicates
-                    sys.argv = [sys.argv[0]] + config_flags + sys.argv[i+2:]  # Skip config_file args
-                    config_processed = True
+                config_arg_indices = [i, i + 1]
                 break
+            elif arg.startswith('--config_file='):
+                config_path = arg.split('=', 1)[1]
+                config_arg_indices = [i]
+                break
+        
+        if config_path and os.path.exists(config_path) and not config_processed:
+            print(f"🔧 Procesando archivo de configuración: {config_path}")
+            # Read config file and insert flags into sys.argv
+            with open(config_path, 'r') as f:
+                config_flags = []
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            if not key.startswith('--'):
+                                key = '--' + key
+                            config_flags.extend([key, value])
+                        elif line.startswith('--'):
+                            parts = line.split(' ', 1)
+                            if len(parts) == 2:
+                                config_flags.extend(parts)
+                            else:
+                                config_flags.append(line)
+            
+            print(f"🔧 Encontrados {len(config_flags)//2} parámetros de configuración")
+            
+            # Remove config_file arguments and insert config flags
+            new_argv = [sys.argv[0]] + config_flags
+            for i, arg in enumerate(sys.argv[1:], 1):
+                if i not in config_arg_indices:
+                    new_argv.append(arg)
+            
+            sys.argv = new_argv
+            config_processed = True
+            print(f"🔧 Configuración procesada. Dataset: {[arg for arg in config_flags if '--dataset' in arg]}")
+        elif config_path and not os.path.exists(config_path):
+            print(f"❌ Archivo de configuración no encontrado: {config_path}")
+        elif not config_path:
+            print("⚠️ No se especificó archivo de configuración")
 
 # Process config file before flag parsing
 process_config_file()

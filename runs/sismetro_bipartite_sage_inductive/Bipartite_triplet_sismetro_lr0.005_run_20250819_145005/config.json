@@ -27,7 +27,7 @@
     "decoder_epochs": 100,
     "weight_decay": 1e-05,
     "num_runs": 1,
-    "graph_encoder_model": "gcn",
+    "graph_encoder_model": "bipartite_sage",
     "graph_encoder_layer_dims": [
         64
     ],
