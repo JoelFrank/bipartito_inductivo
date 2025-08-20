@@ -26,6 +26,8 @@ def define_flags(model_group: ModelGroup):
     flags.DEFINE_integer('lr_warmup_epochs', 500, 'Learning rate warmup epochs')
     flags.DEFINE_integer('decoder_epochs', 100, 'Number of epochs for decoder training')
     flags.DEFINE_float('weight_decay', 1e-5, 'Weight decay')
+    flags.DEFINE_float('link_mlp_weight_decay', 1e-5, 'Weight decay for the link decoder')
+    flags.DEFINE_boolean('use_fixed_negative_samples', True, 'Use fixed negative samples for decoder training to prevent overfitting')
     flags.DEFINE_integer('num_runs', 1, 'Number of runs')
     
     # Model architecture flags

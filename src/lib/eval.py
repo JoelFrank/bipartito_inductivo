@@ -245,11 +245,41 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
     log.info(f"  - valid_edge (positivos): {valid_edge.shape}")
     log.info(f"  - valid_edge_neg (negativos): {valid_edge_neg.shape}")
     
+    # BALANCEO 50-50: Regenerar negativos si no hay balance exacto
     if test_edge_neg.shape[0] == 0:
         log.error("❌ PROBLEMA CRÍTICO: test_edge_neg está vacío!")
         return [], None
-    elif test_edge_neg.shape[0] < test_edge.shape[0]:
-        log.warning(f"⚠️ PROBLEMA: Muy pocos enlaces negativos: {test_edge_neg.shape[0]} vs {test_edge.shape[0]} positivos")
+    elif test_edge_neg.shape[0] != test_edge.shape[0]:
+        log.warning(f"⚠️ DESBALANCE: {test_edge_neg.shape[0]} negativos vs {test_edge.shape[0]} positivos")
+        log.info("🔄 REGENERANDO negativos para balance exacto 50-50...")
+        
+        # Regenerar negativos con cantidad exacta para balance 50-50
+        target_neg_count = test_edge.shape[0]
+        
+        # Get full graph edge index for negative sampling from complete graph
+        if hasattr(data, 'full_edge_index'):
+            full_edge_index = data.full_edge_index
+        elif hasattr(dataset, 'data') and hasattr(dataset.data, 'full_edge_index'):
+            full_edge_index = dataset.data.full_edge_index
+        else:
+            # Fallback: use train + val + test edges as full graph
+            full_edge_index = torch.cat([train_edge.t(), valid_edge.t(), test_edge.t()], dim=1)
+        
+        if is_bipartite:
+            log.info(f"Generando {target_neg_count} negativos bipartitos del grafo completo...")
+            test_edge_neg = bipartite_negative_sampling_inductive(
+                full_edge_index, data, target_neg_count
+            ).t().to(device)
+        else:
+            log.info(f"Generando {target_neg_count} negativos estándar del grafo completo...")
+            test_edge_neg = negative_sampling(
+                edge_index=full_edge_index,
+                num_nodes=data.num_nodes,
+                num_neg_samples=target_neg_count,
+                method='sparse'
+            ).t().to(device)
+        
+        log.info(f"✅ BALANCE CONSEGUIDO: {test_edge.shape[0]} positivos vs {test_edge_neg.shape[0]} negativos")
     
     # DEBUG: Verificar que edge_split contiene datos correctos
     log.info(f"DEBUG edge_split:")
@@ -291,12 +321,12 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                 emb_tensor = embeddings.weight
             
             # ==============================================================================
-            # AÑADIR NORMALIZACIÓN: Escala los vectores para que tengan longitud 1
-            # QUÉ HACE: Normaliza los embeddings para estabilizar el entrenamiento
-            # POR QUÉ: Evita que magnitudes extremas desestabilicen el decodificador
+            # DESACTIVAR NORMALIZACIÓN: Permitir que las magnitudes naturales se usen
+            # QUÉ HACE: Comentamos la normalización L2 para permitir variabilidad
+            # POR QUÉ: La normalización estaba comprimiendo todos los scores a rangos muy estrechos
             # ==============================================================================
             import torch.nn.functional as F
-            emb_tensor = F.normalize(emb_tensor, p=2, dim=1)
+            # # emb_tensor = F.normalize(emb_tensor, p=2, dim=1)  # DESACTIVADO  # DESACTIVADO: Normalization removed
             # ==============================================================================
             
             if is_src_type:
@@ -312,11 +342,11 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             # ==============================================================================
             import torch.nn.functional as F
             if hasattr(embeddings, 'weight'):
-                emb_tensor = F.normalize(embeddings.weight, p=2, dim=1)
+                # emb_tensor = F.normalize(embeddings.weight, p=2, dim=1)  # DESACTIVADO: Normalization removed
                 return emb_tensor[node_ids]
             else:
                 emb = embeddings(node_ids)
-                return F.normalize(emb, p=2, dim=1)
+                # return F.normalize(emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
             # ==============================================================================
     
     for model_type in valid_models:
@@ -327,81 +357,119 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
         # QUÉ HACE: Cambia lr=0.01 hardcodeado por FLAGS.link_mlp_lr configurable
         # POR QUÉ: Permite ajuste fino. Un lr alto en el decodificador causa colapso
         # ==============================================================================
-        optimizer = torch.optim.Adam(decoder.parameters(), lr=FLAGS.link_mlp_lr)
+        optimizer = torch.optim.Adam(decoder.parameters(), lr=FLAGS.link_mlp_lr, weight_decay=FLAGS.link_mlp_weight_decay)
         criterion = torch.nn.BCEWithLogitsLoss()
+        
+        # ANTI-OVERFITTING: Generar muestras negativas fijas para todo el entrenamiento
+        if FLAGS.use_fixed_negative_samples:
+            log.info("Generando muestras negativas fijas para anti-overfitting...")
+            total_train_edges = train_edge.size(0)
+            
+            if is_bipartite:
+                if hasattr(data, 'full_edge_index'):
+                    if is_hetero:
+                        edge_type = ('patrimonio', 'located_at', 'localizacao')
+                        full_edge_index = data[edge_type].edge_index
+                        fixed_neg_edge_index = bipartite_negative_sampling_inductive(full_edge_index, data, total_train_edges)
+                    else:
+                        fixed_neg_edge_index = bipartite_negative_sampling_inductive(data.full_edge_index, data, total_train_edges)
+                else:
+                    if is_hetero:
+                        edge_type = ('patrimonio', 'located_at', 'localizacao')
+                        edge_index = data[edge_type].edge_index
+                        num_nodes_tuple = (data['patrimonio'].num_nodes, data['localizacao'].num_nodes)
+                        fixed_neg_edge_index = negative_sampling(
+                            edge_index=edge_index,
+                            num_nodes=num_nodes_tuple,
+                            num_neg_samples=total_train_edges
+                        )
+                    else:
+                        fixed_neg_edge_index = bipartite_negative_sampling(train_edge.t(), data, total_train_edges)
+            else:
+                fixed_neg_edge_index = negative_sampling(
+                    edge_index=train_edge.t(),
+                    num_nodes=data.num_nodes,
+                    num_neg_samples=total_train_edges,
+                    method='sparse'
+                )
+            
+            fixed_neg_edges = fixed_neg_edge_index.t().to(device)
+            log.info(f"Generadas {fixed_neg_edges.size(0)} muestras negativas fijas")
+        else:
+            fixed_neg_edges = None
         
         for epoch in range(FLAGS.decoder_epochs):  # Use configurable decoder epochs
             decoder.train()
             optimizer.zero_grad()
             
+            # ANTI-OVERFITTING: Usar concatenación normalizada en lugar de element-wise product
             # Positive edges - handle HeteroData mapping
             if is_hetero:
-                pos_embeddings = torch.cat([
-                    get_node_embeddings(train_edge[:, 0], is_src_type=True),
-                    get_node_embeddings(train_edge[:, 1], is_src_type=False)
-                ], dim=1)
+                pos_src_emb = get_node_embeddings(train_edge[:, 0], is_src_type=True)
+                pos_dst_emb = get_node_embeddings(train_edge[:, 1], is_src_type=False)
+                # Normalizar embeddings antes de concatenar
+                # pos_src_emb = torch.nn.functional.normalize(pos_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # pos_dst_emb = torch.nn.functional.normalize(pos_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                pos_embeddings = torch.cat([pos_src_emb, pos_dst_emb], dim=1)
             else:
-                pos_embeddings = torch.cat([
-                    embeddings(train_edge[:, 0]), 
-                    embeddings(train_edge[:, 1])
-                ], dim=1)
+                pos_src_emb = embeddings(train_edge[:, 0])
+                pos_dst_emb = embeddings(train_edge[:, 1])
+                # Normalizar embeddings antes de concatenar
+                # pos_src_emb = torch.nn.functional.normalize(pos_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # pos_dst_emb = torch.nn.functional.normalize(pos_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                pos_embeddings = torch.cat([pos_src_emb, pos_dst_emb], dim=1)
             pos_pred = decoder(pos_embeddings)
             
-            # Negative edges (sample random) - CORRECCIÓN: usar muestreo bipartito-consciente
-            if is_bipartite:
-                # ==============================================================================
-                # CAMBIO 4: Muestreo negativo bipartito en el entrenamiento del decodificador
-                # QUÉ HACE: Si el grafo es bipartito, le pasa el número de nodos de cada
-                # tipo a `negative_sampling`.
-                # POR QUÉ: Para que el decodificador aprenda a distinguir aristas positivas
-                # de negativas válidas (pares src-dst no conectados).
-                # ==============================================================================
-                # Verificar si hay grafo completo para muestreo inductivo correcto
-                if hasattr(data, 'full_edge_index'):
-                    # log.info("Usando muestreo negativo inductivo correcto durante entrenamiento del decoder")
-                    if is_hetero:
-                        # For HeteroData, extract the edge index from the main edge type
-                        edge_type = ('patrimonio', 'located_at', 'localizacao')
-                        full_edge_index = data[edge_type].edge_index
-                        neg_edge_index = bipartite_negative_sampling_inductive(full_edge_index, data, train_edge.size(0))
-                    else:
-                        neg_edge_index = bipartite_negative_sampling_inductive(data.full_edge_index, data, train_edge.size(0))
-                    neg_edges = neg_edge_index.t().to(device)  # Ensure correct device and format
-                else:
-                    # log.warning("Grafo completo no disponible. Usando muestreo bipartito estándar en decoder.")
-                    if is_hetero:
-                        edge_type = ('patrimonio', 'located_at', 'localizacao')
-                        edge_index = data[edge_type].edge_index
-                        num_nodes_tuple = (data['patrimonio'].num_nodes, data['localizacao'].num_nodes)
-                        neg_edge_index = negative_sampling(
-                            edge_index=edge_index,
-                            num_nodes=num_nodes_tuple,
-                            num_neg_samples=train_edge.size(0)
-                        )
-                    else:
-                        neg_edge_index = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
-                    neg_edges = neg_edge_index.t().to(device)  # Ensure correct device and format
+            # ANTI-OVERFITTING: Usar muestras negativas fijas o generar nuevas
+            if FLAGS.use_fixed_negative_samples and fixed_neg_edges is not None:
+                neg_edges = fixed_neg_edges
             else:
-                # Para grafos no bipartitos, usar negative_sampling estándar de PyG
-                neg_edge_index = negative_sampling(
-                    edge_index=train_edge.t(),
-                    num_nodes=data.num_nodes,
-                    num_neg_samples=train_edge.size(0),
-                    method='sparse'
-                )
+                # Muestreo tradicional (para comparación)
+                if is_bipartite:
+                    if hasattr(data, 'full_edge_index'):
+                        if is_hetero:
+                            edge_type = ('patrimonio', 'located_at', 'localizacao')
+                            full_edge_index = data[edge_type].edge_index
+                            neg_edge_index = bipartite_negative_sampling_inductive(full_edge_index, data, train_edge.size(0))
+                        else:
+                            neg_edge_index = bipartite_negative_sampling_inductive(data.full_edge_index, data, train_edge.size(0))
+                    else:
+                        if is_hetero:
+                            edge_type = ('patrimonio', 'located_at', 'localizacao')
+                            edge_index = data[edge_type].edge_index
+                            num_nodes_tuple = (data['patrimonio'].num_nodes, data['localizacao'].num_nodes)
+                            neg_edge_index = negative_sampling(
+                                edge_index=edge_index,
+                                num_nodes=num_nodes_tuple,
+                                num_neg_samples=train_edge.size(0)
+                            )
+                        else:
+                            neg_edge_index = bipartite_negative_sampling(train_edge.t(), data, train_edge.size(0))
+                else:
+                    neg_edge_index = negative_sampling(
+                        edge_index=train_edge.t(),
+                        num_nodes=data.num_nodes,
+                        num_neg_samples=train_edge.size(0),
+                        method='sparse'
+                    )
                 neg_edges = neg_edge_index.t().to(device)
             
+            # ANTI-OVERFITTING: Usar concatenación normalizada en lugar de element-wise product
             # Get negative embeddings with proper mapping
             if is_hetero:
-                neg_embeddings = torch.cat([
-                    get_node_embeddings(neg_edges[:, 0], is_src_type=True),
-                    get_node_embeddings(neg_edges[:, 1], is_src_type=False)
-                ], dim=1)
+                neg_src_emb = get_node_embeddings(neg_edges[:, 0], is_src_type=True)
+                neg_dst_emb = get_node_embeddings(neg_edges[:, 1], is_src_type=False)
+                # Normalizar embeddings antes de concatenar
+                # neg_src_emb = torch.nn.functional.normalize(neg_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # neg_dst_emb = torch.nn.functional.normalize(neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                neg_embeddings = torch.cat([neg_src_emb, neg_dst_emb], dim=1)
             else:
-                neg_embeddings = torch.cat([
-                    embeddings(neg_edges[:, 0]),
-                    embeddings(neg_edges[:, 1])
-                ], dim=1)
+                neg_src_emb = embeddings(neg_edges[:, 0])
+                neg_dst_emb = embeddings(neg_edges[:, 1])
+                # Normalizar embeddings antes de concatenar
+                # neg_src_emb = torch.nn.functional.normalize(neg_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # neg_dst_emb = torch.nn.functional.normalize(neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                neg_embeddings = torch.cat([neg_src_emb, neg_dst_emb], dim=1)
             neg_pred = decoder(neg_embeddings)
             
             # Loss
@@ -412,32 +480,51 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             loss.backward()
             optimizer.step()
             
-            # Log progress cada 10 épocas
-            if epoch % 10 == 0:
-                print(f"[{model_type.upper()} Decoder] Época {epoch}/{FLAGS.decoder_epochs} - Loss: {loss.item():.6f}")
+            # DEBUG: Log detallado cada 5 épocas
+            if epoch % 5 == 0:
+                # Obtener predicciones en formato sigmoid para análisis
+                with torch.no_grad():
+                    pos_pred_sigmoid = torch.sigmoid(pos_pred.squeeze())
+                    neg_pred_sigmoid = torch.sigmoid(neg_pred.squeeze())
+                    
+                print(f"[{model_type.upper()} Decoder] Época {epoch}/{FLAGS.decoder_epochs}")
+                print(f"  Loss total: {loss.item():.6f} (pos: {pos_loss.item():.6f}, neg: {neg_loss.item():.6f})")
+                print(f"  Pos sigmoid - mean: {pos_pred_sigmoid.mean().item():.6f}, std: {pos_pred_sigmoid.std().item():.6f}")
+                print(f"  Neg sigmoid - mean: {neg_pred_sigmoid.mean().item():.6f}, std: {neg_pred_sigmoid.std().item():.6f}")
+                print(f"  Separación: {pos_pred_sigmoid.mean().item() - neg_pred_sigmoid.mean().item():.6f}")
         
         # Evaluate
         decoder.eval()
         with torch.no_grad():
             # Validation - handle HeteroData mapping
             if is_hetero:
-                val_pos_embeddings = torch.cat([
-                    get_node_embeddings(valid_edge[:, 0], is_src_type=True),
-                    get_node_embeddings(valid_edge[:, 1], is_src_type=False)
-                ], dim=1)
-                val_neg_embeddings = torch.cat([
-                    get_node_embeddings(valid_edge_neg[:, 0], is_src_type=True),
-                    get_node_embeddings(valid_edge_neg[:, 1], is_src_type=False)
-                ], dim=1)
+                val_pos_src_emb = get_node_embeddings(valid_edge[:, 0], is_src_type=True)
+                val_pos_dst_emb = get_node_embeddings(valid_edge[:, 1], is_src_type=False)
+                # Normalizar embeddings antes de concatenar
+                # val_pos_src_emb = torch.nn.functional.normalize(val_pos_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # val_pos_dst_emb = torch.nn.functional.normalize(val_pos_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                val_pos_embeddings = torch.cat([val_pos_src_emb, val_pos_dst_emb], dim=1)
+                
+                val_neg_src_emb = get_node_embeddings(valid_edge_neg[:, 0], is_src_type=True)
+                val_neg_dst_emb = get_node_embeddings(valid_edge_neg[:, 1], is_src_type=False)
+                # Normalizar embeddings antes de concatenar
+                # val_neg_src_emb = torch.nn.functional.normalize(val_neg_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # val_neg_dst_emb = torch.nn.functional.normalize(val_neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                val_neg_embeddings = torch.cat([val_neg_src_emb, val_neg_dst_emb], dim=1)
             else:
-                val_pos_embeddings = torch.cat([
-                    embeddings(valid_edge[:, 0]),
-                    embeddings(valid_edge[:, 1])
-                ], dim=1)
-                val_neg_embeddings = torch.cat([
-                    embeddings(valid_edge_neg[:, 0]),
-                    embeddings(valid_edge_neg[:, 1])
-                ], dim=1)
+                val_pos_src_emb = embeddings(valid_edge[:, 0])
+                val_pos_dst_emb = embeddings(valid_edge[:, 1])
+                # Normalizar embeddings antes de concatenar
+                # val_pos_src_emb = torch.nn.functional.normalize(val_pos_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # val_pos_dst_emb = torch.nn.functional.normalize(val_pos_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                val_pos_embeddings = torch.cat([val_pos_src_emb, val_pos_dst_emb], dim=1)
+                
+                val_neg_src_emb = embeddings(valid_edge_neg[:, 0])
+                val_neg_dst_emb = embeddings(valid_edge_neg[:, 1])
+                # Normalizar embeddings antes de concatenar
+                # val_neg_src_emb = torch.nn.functional.normalize(val_neg_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # val_neg_dst_emb = torch.nn.functional.normalize(val_neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                val_neg_embeddings = torch.cat([val_neg_src_emb, val_neg_dst_emb], dim=1)
             
             val_pos_pred = decoder.predict(val_pos_embeddings).squeeze()
             val_neg_pred = decoder.predict(val_neg_embeddings).squeeze()
@@ -445,23 +532,33 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             
             # Test - handle HeteroData mapping
             if is_hetero:
-                test_pos_embeddings = torch.cat([
-                    get_node_embeddings(test_edge[:, 0], is_src_type=True),
-                    get_node_embeddings(test_edge[:, 1], is_src_type=False)
-                ], dim=1)
-                test_neg_embeddings = torch.cat([
-                    get_node_embeddings(test_edge_neg[:, 0], is_src_type=True),
-                    get_node_embeddings(test_edge_neg[:, 1], is_src_type=False)
-                ], dim=1)
+                test_pos_src_emb = get_node_embeddings(test_edge[:, 0], is_src_type=True)
+                test_pos_dst_emb = get_node_embeddings(test_edge[:, 1], is_src_type=False)
+                # Normalizar embeddings antes de concatenar
+                # test_pos_src_emb = torch.nn.functional.normalize(test_pos_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # test_pos_dst_emb = torch.nn.functional.normalize(test_pos_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                test_pos_embeddings = torch.cat([test_pos_src_emb, test_pos_dst_emb], dim=1)
+                
+                test_neg_src_emb = get_node_embeddings(test_edge_neg[:, 0], is_src_type=True)
+                test_neg_dst_emb = get_node_embeddings(test_edge_neg[:, 1], is_src_type=False)
+                # Normalizar embeddings antes de concatenar
+                # test_neg_src_emb = torch.nn.functional.normalize(test_neg_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # test_neg_dst_emb = torch.nn.functional.normalize(test_neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                test_neg_embeddings = torch.cat([test_neg_src_emb, test_neg_dst_emb], dim=1)
             else:
-                test_pos_embeddings = torch.cat([
-                    embeddings(test_edge[:, 0]),
-                    embeddings(test_edge[:, 1])
-                ], dim=1)
-                test_neg_embeddings = torch.cat([
-                    embeddings(test_edge_neg[:, 0]),
-                    embeddings(test_edge_neg[:, 1])
-                ], dim=1)
+                test_pos_src_emb = embeddings(test_edge[:, 0])
+                test_pos_dst_emb = embeddings(test_edge[:, 1])
+                # Normalizar embeddings antes de concatenar
+                # test_pos_src_emb = torch.nn.functional.normalize(test_pos_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # test_pos_dst_emb = torch.nn.functional.normalize(test_pos_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                test_pos_embeddings = torch.cat([test_pos_src_emb, test_pos_dst_emb], dim=1)
+                
+                test_neg_src_emb = embeddings(test_edge_neg[:, 0])
+                test_neg_dst_emb = embeddings(test_edge_neg[:, 1])
+                # Normalizar embeddings antes de concatenar
+                # test_neg_src_emb = torch.nn.functional.normalize(test_neg_src_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                # test_neg_dst_emb = torch.nn.functional.normalize(test_neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
+                test_neg_embeddings = torch.cat([test_neg_src_emb, test_neg_dst_emb], dim=1)
             
             test_pos_pred = decoder.predict(test_pos_embeddings).squeeze()
             test_neg_pred = decoder.predict(test_neg_embeddings).squeeze()

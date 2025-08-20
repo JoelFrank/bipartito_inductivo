@@ -216,6 +216,13 @@ def main(_):
             'test': {'edge': test_data.edge_index.t()}
         }
         
+        # DEBUG: Verificar número de aristas antes de generar negativos
+        log.info(f"DEBUG - Aristas cargadas desde archivos:")
+        log.info(f"  Train: {train_data.edge_index.shape[1]} aristas")
+        log.info(f"  Val: {val_data.edge_index.shape[1]} aristas") 
+        log.info(f"  Test: {test_data.edge_index.shape[1]} aristas")
+        log.info(f"  Test en edge_split: {edge_split['test']['edge'].shape[0]} aristas")
+        
         # Generate negative edges for evaluation
         log.info("Generando enlaces negativos para evaluación...")
         from lib.split import generate_neg_edges

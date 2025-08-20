@@ -22,12 +22,20 @@ class MlpProdDecoder(torch.nn.Module):
     def __init__(self, embedding_size, hidden_size):
         super().__init__()
         self.embedding_size = embedding_size
+        # La entrada es concatenación de embeddings (2 * embedding_size)
+        # La salida del producto element-wise es embedding_size
         self.net = nn.Sequential(
-            nn.Linear(embedding_size, hidden_size), nn.ReLU(), nn.Linear(hidden_size, 1)
+            nn.Linear(embedding_size, hidden_size),  # Entrada: embedding_size (después del producto)
+            nn.ReLU(), 
+            nn.Dropout(0.5),  # AUMENTADO: Dropout más fuerte para evitar overfitting
+            nn.Linear(hidden_size, 1)
         )
     def forward(self, x):
+        # x es concatenación de embeddings [src_emb, dst_emb] con dimensión (batch, 2*embedding_size)
+        # Separar y hacer producto element-wise
         left, right = x[:, : self.embedding_size], x[:, self.embedding_size :]
-        return self.net(left * right)
+        product = left * right  # Resultado: (batch, embedding_size)
+        return self.net(product)
     def predict(self, x): return torch.sigmoid(self.forward(x))
 
 class DecoderZoo:
