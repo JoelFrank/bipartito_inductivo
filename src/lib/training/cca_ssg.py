@@ -27,7 +27,13 @@ def perform_cca_ssg_training(data, output_dir, device, input_size: int, has_feat
         loss = cca_ssg_loss(y1, y2, FLAGS.cca_lambda, data.num_nodes)
         loss.backward()
         optimizer.step()
-        wandb.log({'cca_train_loss': loss.item(), 'epoch': epoch})
+        # wandb.log({'cca_train_loss': loss.item(), 'epoch': epoch})  # Comentado para logs más limpios
+        
+        # Log progress cada 10 épocas
+        if epoch % 10 == 0:
+            print(f"[CCA-SSG Encoder] Época {epoch}/{FLAGS.epochs} - Loss: {loss.item():.6f}")
+            # Log a wandb solo cada 10 épocas
+            wandb.log({'cca_train_loss': loss.item(), 'epoch': epoch})
 
     encoder = copy.deepcopy(model.encoder.eval())
     representations = compute_data_representations_only(encoder, data, device, has_features)

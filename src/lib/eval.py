@@ -358,7 +358,7 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                 # ==============================================================================
                 # Verificar si hay grafo completo para muestreo inductivo correcto
                 if hasattr(data, 'full_edge_index'):
-                    log.info("Usando muestreo negativo inductivo correcto durante entrenamiento del decoder")
+                    # log.info("Usando muestreo negativo inductivo correcto durante entrenamiento del decoder")
                     if is_hetero:
                         # For HeteroData, extract the edge index from the main edge type
                         edge_type = ('patrimonio', 'located_at', 'localizacao')
@@ -368,7 +368,7 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                         neg_edge_index = bipartite_negative_sampling_inductive(data.full_edge_index, data, train_edge.size(0))
                     neg_edges = neg_edge_index.t().to(device)  # Ensure correct device and format
                 else:
-                    log.warning("Grafo completo no disponible. Usando muestreo bipartito estándar en decoder.")
+                    # log.warning("Grafo completo no disponible. Usando muestreo bipartito estándar en decoder.")
                     if is_hetero:
                         edge_type = ('patrimonio', 'located_at', 'localizacao')
                         edge_index = data[edge_type].edge_index
@@ -411,6 +411,10 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
             
             loss.backward()
             optimizer.step()
+            
+            # Log progress cada 10 épocas
+            if epoch % 10 == 0:
+                print(f"[{model_type.upper()} Decoder] Época {epoch}/{FLAGS.decoder_epochs} - Loss: {loss.item():.6f}")
         
         # Evaluate
         decoder.eval()

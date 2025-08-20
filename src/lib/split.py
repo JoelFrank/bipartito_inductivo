@@ -81,7 +81,7 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
     # Ensure tensors are on the same device as full_edge_index
     device = full_edge_index.device
     
-    log.info(f"Muestreo negativo inductivo: usando grafo completo con {full_edge_index.size(1)} aristas")
+    # log.info(f"Muestreo negativo inductivo: usando grafo completo con {full_edge_index.size(1)} aristas")
     
     # ==============================================================================
     # CAMBIO 5: Muestreo negativo bipartito inductivo usando tupla de nodos
@@ -95,7 +95,7 @@ def bipartite_negative_sampling_inductive(full_edge_index, data, num_neg_samples
         method='sparse'
     )
     
-    log.info(f"Generados {neg_edge_index.size(1)} enlaces negativos válidos")
+    # log.info(f"Generados {neg_edge_index.size(1)} enlaces negativos válidos")
     
     # Ensure the result is on the correct device - FORCE device placement
     if hasattr(full_edge_index, 'device'):
@@ -127,7 +127,7 @@ def generate_neg_edges(pos_edges, num_nodes, num_neg=None, data=None):
         for i in range(data.full_edge_index.size(1)):
             edge = tuple(sorted([data.full_edge_index[0, i].item(), data.full_edge_index[1, i].item()]))
             full_edge_set.add(edge)
-        log.info(f"Muestreo negativo inductivo: evitando {len(full_edge_set)} enlaces del grafo completo")
+            # log.info(f"Muestreo negativo inductivo: evitando {len(full_edge_set)} enlaces del grafo completo")
     
     neg_edges = []
     max_attempts = num_neg * 100  # Prevent infinite loops

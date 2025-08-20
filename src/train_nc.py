@@ -70,8 +70,7 @@ def process_config_file():
             print(f"🔧 Configuración procesada. Dataset: {[arg for arg in config_flags if '--dataset' in arg]}")
         elif config_path and not os.path.exists(config_path):
             print(f"❌ Archivo de configuración no encontrado: {config_path}")
-        elif not config_path:
-            print("⚠️ No se especificó archivo de configuración")
+        # Eliminar la advertencia falsa que aparecía aquí
 
 # Process config file before flag parsing
 process_config_file()
@@ -237,13 +236,13 @@ def main(_):
         ).t()  # Transponer resultado para mantener consistencia con edge_split format [num_edges, 2]
         log.info(f"✓ Test negativos generados usando full_edge_index: {edge_split['test']['edge_neg'].shape}")
         
-        # Diagnóstico adicional
-        log.info(f"Diagnóstico de enlaces negativos:")
-        log.info(f"  - Positivos val: {edge_split['valid']['edge'].shape}")
-        log.info(f"  - Negativos val: {edge_split['valid']['edge_neg'].shape}")
-        log.info(f"  - Positivos test: {edge_split['test']['edge'].shape}")
-        log.info(f"  - Negativos test: {edge_split['test']['edge_neg'].shape}")
-        log.info(f"  - Full graph edges: {val_data.full_edge_index.shape[1]}")
+        # Diagnóstico adicional (comentado para logs más limpios)
+        # log.info(f"Diagnóstico de enlaces negativos:")
+        # log.info(f"  - Positivos val: {edge_split['valid']['edge'].shape}")
+        # log.info(f"  - Negativos val: {edge_split['valid']['edge_neg'].shape}")
+        # log.info(f"  - Positivos test: {edge_split['test']['edge'].shape}")
+        # log.info(f"  - Negativos test: {edge_split['test']['edge_neg'].shape}")
+        # log.info(f"  - Full graph edges: {val_data.full_edge_index.shape[1]}")
         
         # Verificar que los negativos no estén vacíos
         if edge_split['test']['edge_neg'].shape[0] == 0:

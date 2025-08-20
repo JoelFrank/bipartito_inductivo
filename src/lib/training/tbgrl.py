@@ -44,7 +44,13 @@ def perform_triplet_training(data, output_dir, representation_size, device, inpu
         loss.backward()
         optimizer.step()
         model.update_target_network(mm)
-        wandb.log({'tbgrl_train_loss': loss.item(), 'epoch': epoch})
+        # wandb.log({'tbgrl_train_loss': loss.item(), 'epoch': epoch})  # Comentado para logs más limpios
+        
+        # Log progress cada 10 épocas
+        if epoch % 10 == 0:
+            print(f"[T-BGRL Encoder] Época {epoch}/{FLAGS.epochs} - Loss: {loss.item():.6f} - LR: {lr:.6f}")
+            # Log a wandb solo cada 10 épocas
+            wandb.log({'tbgrl_train_loss': loss.item(), 'epoch': epoch})
 
     encoder = copy.deepcopy(model.online_encoder.eval())
     representations = compute_data_representations_only(encoder, data, device, has_features)

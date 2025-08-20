@@ -138,36 +138,50 @@ class BipartiteSAGE(nn.Module):
                         num_nodes_type_1 = min(num_nodes_type_1, available_nodes)
                         num_nodes_type_2 = available_nodes - num_nodes_type_1
                     
-                    x_src = data.x[:num_nodes_type_1]
-                    x_dst = data.x[num_nodes_type_1:num_nodes_type_1 + num_nodes_type_2]
+                    x_src = data.x[:num_nodes_type_1].to(dtype=torch.float32)
+                    x_dst = data.x[num_nodes_type_1:num_nodes_type_1 + num_nodes_type_2].to(dtype=torch.float32)
+                    
+                    # CORRECCIÓN: Ajustar las proyecciones si las dimensiones de entrada no coinciden
+                    if x_src.size(1) != self.src_proj.in_features:
+                        # print(f"⚠️ Redimensionando proyecciones: {self.src_proj.in_features} → {x_src.size(1)}")
+                        # Recrear proyecciones con las dimensiones correctas
+                        actual_dim = x_src.size(1)
+                        self.src_proj = nn.Linear(actual_dim, self.hidden_channels).to(x_src.device)
+                        self.dst_proj = nn.Linear(actual_dim, self.hidden_channels).to(x_dst.device)
                 else:
-                    # Crear features sintéticas
-                    x_src = torch.randn(num_nodes_type_1, self.in_channels_src, device=device)
-                    x_dst = torch.randn(num_nodes_type_2, self.in_channels_dst, device=device)
+                    # Crear features sintéticas con el tipo correcto
+                    x_src = torch.randn(num_nodes_type_1, self.in_channels_src, device=device, dtype=torch.float32)
+                    x_dst = torch.randn(num_nodes_type_2, self.in_channels_dst, device=device, dtype=torch.float32)
                 
-                edge_index = data.edge_index
+                edge_index = data.edge_index.to(dtype=torch.long)
             else:
                 # Fallback: dividir nodos equitativamente
                 num_nodes_type_1 = total_nodes // 2
                 num_nodes_type_2 = total_nodes - num_nodes_type_1
                 
-                x_src = torch.randn(num_nodes_type_1, self.in_channels_src, device=device)
-                x_dst = torch.randn(num_nodes_type_2, self.in_channels_dst, device=device)
-                edge_index = data.edge_index
+                x_src = torch.randn(num_nodes_type_1, self.in_channels_src, device=device, dtype=torch.float32)
+                x_dst = torch.randn(num_nodes_type_2, self.in_channels_dst, device=device, dtype=torch.float32)
+                edge_index = data.edge_index.to(dtype=torch.long)
         
-        # Procesar embeddings si es necesario
-        if self.use_embeddings:
-            x_src = self.embedding_processor(x_src)
-            x_dst = self.embedding_processor(x_dst)
+        # Procesar embeddings solo si tenemos índices discretos, no features continuas
+        if self.use_embeddings and data.x is None:
+            # Solo usar embedding processor si no hay features reales y necesitamos crear embeddings de índices
+            # En este caso, crear índices para los nodos
+            x_src_indices = torch.arange(num_nodes_type_1, device=device, dtype=torch.long)
+            x_dst_indices = torch.arange(num_nodes_type_2, device=device, dtype=torch.long) + num_nodes_type_1
+            
+            x_src = self.embedding_processor(x_src_indices)
+            x_dst = self.embedding_processor(x_dst_indices)
+        # Si tenemos features reales o sintéticas, no usar embedding processor
         
         # Proyectar a dimensiones comunes
         x_src = self.src_proj(x_src)
         x_dst = self.dst_proj(x_dst)
         
-        # DEBUG info
-        print(f"🔧 BipartiteSAGE forward:")
-        print(f"  x_src: {x_src.shape}, x_dst: {x_dst.shape}")
-        print(f"  edge_index: {edge_index.shape}, range: [{edge_index.min().item()}, {edge_index.max().item()}]")
+        # DEBUG info (comentado para limpiar logs)
+        # print(f"🔧 BipartiteSAGE forward:")
+        # print(f"  x_src: {x_src.shape}, x_dst: {x_dst.shape}")
+        # print(f"  edge_index: {edge_index.shape}, range: [{edge_index.min().item()}, {edge_index.max().item()}]")
         
         # ENFOQUE SIMPLIFICADO: Usar SAGEConv estándar con concatenación
         # En lugar de intentar manejar bipartición manualmente, 
@@ -176,7 +190,7 @@ class BipartiteSAGE(nn.Module):
         # Concatenar todas las features
         x_all = torch.cat([x_src, x_dst], dim=0)  # [total_nodes, hidden_channels]
         
-        print(f"  x_all concatenated: {x_all.shape}")
+        # print(f"  x_all concatenated: {x_all.shape}")
         
         # Verificar que edge_index sea válido para x_all
         if edge_index.max().item() >= x_all.size(0):
@@ -219,7 +233,7 @@ class BipartiteSAGE(nn.Module):
             
             x = x_new
         
-        print(f"✓ BipartiteSAGE resultado: {x.shape}")
+        # print(f"✓ BipartiteSAGE resultado: {x.shape}")
         return x
 
     def reset_parameters(self):
@@ -244,8 +258,12 @@ class EncoderZoo:
             return GCN([effective_input_size] + flags.graph_encoder_layer_dims, batchnorm=True, use_feat=use_feat, n_nodes=n_nodes)
         elif model_class == BipartiteSAGE:
             # Para BipartiteSAGE necesitamos dimensiones específicas de entrada para cada tipo de nodo
-            # Asumimos que input_size es una tupla (in_channels_src, in_channels_dst)
-            if isinstance(input_size, tuple):
+            # Detectar las dimensiones reales de los datos si están disponibles
+            if data is not None and hasattr(data, 'x') and data.x is not None:
+                actual_input_size = data.x.size(1)
+                print(f"🔧 Detectando dimensión real de features: {actual_input_size}")
+                in_channels_src = in_channels_dst = actual_input_size
+            elif isinstance(input_size, tuple):
                 in_channels_src, in_channels_dst = input_size
             else:
                 # Fallback: usar la misma dimensión para ambos tipos de nodos
