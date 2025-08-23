@@ -124,7 +124,7 @@ def get_dataset(name, root, transform=None, use_hetero=False):
         transform = Compose([ConvertToFloat(), NormalizeFeatures()])
     
     # --- LÓGICA PARA CARGAR EL DATASET BIPARTITO ---
-    if name in ['sismetro_inductive', 'sismetro', 'my-bipartite-dataset']:
+    if name in ['sismetro_inductive', 'sismetro', 'sismetro_clean', 'sismetro_clean_inductive', 'my-bipartite-dataset']:
         # Ruta al archivo del dataset
         data_path = os.path.join(root, 'processed', f'{name}.pt')
         
@@ -142,7 +142,7 @@ def get_dataset(name, root, transform=None, use_hetero=False):
     
     # --- LÓGICA ORIGINAL PARA OTROS DATASETS ---
     else:
-        raise ValueError(f"Dataset {name} not supported. Use 'sismetro' or 'sismetro_inductive'")
+        raise ValueError(f"Dataset {name} not supported. Use 'sismetro', 'sismetro_clean', 'sismetro_clean_inductive', or 'sismetro_inductive'")
 
 # ==============================================================================
 # Función auxiliar para verificar si un dataset es bipartito

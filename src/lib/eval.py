@@ -526,8 +526,14 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                 # val_neg_dst_emb = torch.nn.functional.normalize(val_neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
                 val_neg_embeddings = torch.cat([val_neg_src_emb, val_neg_dst_emb], dim=1)
             
-            val_pos_pred = decoder.predict(val_pos_embeddings).squeeze()
-            val_neg_pred = decoder.predict(val_neg_embeddings).squeeze()
+            # Obtener logits y aplicar sigmoid para scores entre 0-1
+            val_pos_logits = decoder.forward(val_pos_embeddings).squeeze()
+            val_neg_logits = decoder.forward(val_neg_embeddings).squeeze()
+            
+            # Aplicar sigmoid para obtener probabilidades entre 0-1
+            val_pos_pred = torch.sigmoid(val_pos_logits)
+            val_neg_pred = torch.sigmoid(val_neg_logits)
+            
             val_results = eval_all(val_pos_pred, val_neg_pred)
             
             # Test - handle HeteroData mapping
@@ -560,8 +566,14 @@ def do_all_eval(model_name, output_dir, valid_models, dataset, edge_split,
                 # test_neg_dst_emb = torch.nn.functional.normalize(test_neg_dst_emb, p=2, dim=1)  # DESACTIVADO: Normalization removed
                 test_neg_embeddings = torch.cat([test_neg_src_emb, test_neg_dst_emb], dim=1)
             
-            test_pos_pred = decoder.predict(test_pos_embeddings).squeeze()
-            test_neg_pred = decoder.predict(test_neg_embeddings).squeeze()
+            # Obtener logits y aplicar sigmoid para scores entre 0-1
+            test_pos_logits = decoder.forward(test_pos_embeddings).squeeze()
+            test_neg_logits = decoder.forward(test_neg_embeddings).squeeze()
+            
+            # Aplicar sigmoid para obtener probabilidades entre 0-1
+            test_pos_pred = torch.sigmoid(test_pos_logits)
+            test_neg_pred = torch.sigmoid(test_neg_logits)
+            
             test_results = eval_all(test_pos_pred, test_neg_pred)
             
             # DEBUG: Verificar tamaños antes de exportar CSV

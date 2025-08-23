@@ -8,6 +8,7 @@ from lib.models import EncoderZoo
 from lib.eval import do_all_eval
 from lib.training import perform_bgrl_training, perform_cca_ssg_training, perform_gbt_training, perform_triplet_training
 from lib.split import do_transductive_edge_split
+from lib.bipartite_inductive_split import do_bipartite_inductive_node_split
 from lib.utils import merge_multirun_results, print_run_num
 import lib.flags as FlagHelper
 
@@ -133,6 +134,44 @@ def main(_):
         # Assign training edges to data object for encoder training
         data.edge_index = edge_split['train']['edge'].t()
         training_data = data.to(device)
+        inference_data = data.to(device)  # Mismo grafo para transductivo
+        
+    elif FLAGS.split_method == 'inductive_nodes':
+        log.info("=== USANDO SPLIT INDUCTIVO BASADO EN NODOS ===")
+        log.info("Este es el método correcto para aprendizaje inductivo bipartito")
+        
+        # Aplicar split inductivo basado en separación de nodos
+        inductive_split = do_bipartite_inductive_node_split(
+            data, 
+            observed_ratio=FLAGS.observed_node_ratio,
+            split_seed=FLAGS.split_seed
+        )
+        
+        # FASE 1: training_data solo contiene nodos observados (para preentrenar encoder)
+        training_data = inductive_split['training_data'].to(device)
+        
+        # FASE 2 y 3: inference_data contiene todos los nodos (para decoder y evaluación)
+        inference_data = inductive_split['inference_data'].to(device)
+        
+        # Crear edge_split compatible con el resto del código
+        edge_split = {
+            'train': {'edge': inductive_split['train_edge_bundle'].t()},
+            'valid': {
+                'edge': inductive_split['val_edge_bundle'].t(),
+                'edge_neg': inductive_split['val_neg_edge_bundle'].t()
+            },
+            'test': {
+                'edge': inductive_split['test_edge_bundle'].t(),
+                'edge_neg': inductive_split['test_neg_edge_bundle'].t()
+            }
+        }
+        
+        log.info(f"✓ Training data (encoder): {training_data.num_nodes} nodos observados")
+        log.info(f"✓ Inference data (decoder): {inference_data.num_nodes} nodos totales")
+        log.info(f"✓ Train edges: {edge_split['train']['edge'].shape[0]}")
+        log.info(f"✓ Val edges: {edge_split['valid']['edge'].shape[0]} pos, {edge_split['valid']['edge_neg'].shape[0]} neg")
+        log.info(f"✓ Test edges: {edge_split['test']['edge'].shape[0]} pos, {edge_split['test']['edge_neg'].shape[0]} neg")
+        
     elif FLAGS.split_method == 'inductive':
         log.info("Loading inductive split datasets...")
         # Load inductive split datasets
@@ -259,6 +298,15 @@ def main(_):
         
         # Update data to use training data structure
         data = train_data
+        training_data = train_data.to(device)
+        inference_data = test_data.to(device)  # Para inferencia usamos el test que tiene todos los nodos
+        
+        # Move full_edge_index to the correct device if it exists
+        if hasattr(training_data, 'full_edge_index'):
+            training_data.full_edge_index = training_data.full_edge_index.to(device)
+        if hasattr(inference_data, 'full_edge_index'):
+            inference_data.full_edge_index = inference_data.full_edge_index.to(device)
+            
     else:
         log.error(f"Unknown split method: {FLAGS.split_method}")
         return
@@ -302,40 +350,49 @@ def main(_):
 
         log.info("Encoder training finished. Evaluating decoder...")
         
-        if FLAGS.split_method == 'inductive':
-            # For inductive evaluation, generate fresh embeddings using the trained encoder
-            # All data splits already contain all nodes (2798), so we can use any of them
-            # We use train_data structure but the encoder was trained on its edge pattern
+        if FLAGS.split_method in ['inductive', 'inductive_nodes']:
+            # Para evaluación inductiva, generar embeddings frescos usando el encoder entrenado
             log.info("Generando embeddings para evaluación inductiva...")
             
             encoder.eval()
             with torch.no_grad():
-                # Generate embeddings for all nodes using train_data structure
-                # (all splits have the same nodes, only edges differ)
-                all_representations = encoder(training_data)
+                # CLAVE: Para el nuevo método inductivo, usamos inference_data que contiene TODOS los nodos
+                # Para el método temporal, usamos training_data que ya tiene todos los nodos
+                if FLAGS.split_method == 'inductive_nodes':
+                    all_representations = encoder(inference_data)
+                    log.info(f"✓ Embeddings generados para TODOS los nodos: {all_representations.size(0)}")
+                else:  # inductive temporal
+                    all_representations = encoder(training_data)
+                    log.info(f"✓ Embeddings generados para {all_representations.size(0)} nodos")
             
             embeddings = torch.nn.Embedding.from_pretrained(all_representations, freeze=True)
-            log.info(f"✓ Embeddings generados para {all_representations.size(0)} nodos")
         else:
-            # Transductive case: use the representations from training
+            # Caso transductivo: usar las representaciones del entrenamiento
             embeddings = torch.nn.Embedding.from_pretrained(representations, freeze=True)
         
         # Evaluate decoder
-        if FLAGS.split_method == 'inductive':
-            # For inductive evaluation, we need to evaluate on val and test sets
-            # Pass train_data which contains the correct bipartite metadata and full_edge_index
+        if FLAGS.split_method in ['inductive', 'inductive_nodes']:
+            # Para evaluación inductiva, necesitamos evaluar en sets val y test
+            # Usar inference_data que contiene los metadatos bipartitos correctos para TODOS los nodos
+            if FLAGS.split_method == 'inductive_nodes':
+                eval_data = inference_data
+                log.info(f"✓ Usando inference_data para evaluación: {eval_data.num_nodes} nodos")
+            else:  # inductive temporal
+                eval_data = training_data  # Mantener compatibilidad con método temporal
+                log.info(f"✓ Usando training_data para evaluación: {eval_data.num_nodes} nodos")
+            
             results, _ = do_all_eval(
                 get_full_model_name(),
                 OUTPUT_DIR,
                 [FLAGS.link_pred_model],
-                train_data,  # Use training data which has bipartite metadata and full_edge_index
+                eval_data,
                 edge_split,
                 embeddings,
                 dec_zoo,
                 wandb
             )
         else:
-            # Transductive evaluation
+            # Evaluación transductiva
             results, _ = do_all_eval(
                 get_full_model_name(),
                 OUTPUT_DIR,

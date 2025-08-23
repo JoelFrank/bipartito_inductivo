@@ -14,10 +14,11 @@ def define_flags(model_group: ModelGroup):
     flags.DEFINE_string('dataset', 'my-bipartite-dataset', 'Dataset name')
     flags.DEFINE_string('dataset_dir', '../data', 'Dataset directory')
     flags.DEFINE_string('logdir', '../runs', 'Log directory')
-    flags.DEFINE_enum('split_method', 'transductive', ['transductive', 'inductive'], 'Split method')
+    flags.DEFINE_enum('split_method', 'transductive', ['transductive', 'inductive', 'inductive_nodes'], 'Split method')
     flags.DEFINE_integer('split_seed', 42, 'Seed for data splitting')
     flags.DEFINE_boolean('inductive', False, 'Use inductive learning setup')
     flags.DEFINE_boolean('temporal_split', False, 'Use temporal split for inductive learning')
+    flags.DEFINE_float('observed_node_ratio', 0.7, 'Ratio of observed nodes for inductive node split')
     
     # Training flags
     flags.DEFINE_float('lr', 0.005, 'Learning rate')
